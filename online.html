@@ -7,6 +7,7 @@
 @media(max-width:799px){.auction-layout>.stack{display:contents}.auction-layout .player-card{order:0}.auction-layout>.bid-panel{order:1}.auction-layout>.stack>.panel:not(.player-card){order:2}}
 .mobile-stats{display:none}@media(max-width:799px){.mobile-stats{display:inline-flex}.scroll-table:not(.full-table) :is(th,td):nth-child(n+4):nth-child(-n+8){display:none}}
 h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not(.full-table) table{table-layout:fixed}.scroll-table:not(.full-table) :is(th,td):nth-child(2){width:44%;min-width:0;white-space:normal;overflow-wrap:anywhere}}
+.skipped-panel{margin-top:20px}.queue-player{flex:1;min-width:0}.queue-number{flex:none;width:25px;height:25px;border-radius:8px;display:grid;place-items:center;background:#27364a;color:var(--green);font-size:12px;font-weight:800}.skipped-panel .sale-row{gap:10px}.skipped-panel .pill{white-space:nowrap}@media(max-width:799px){.skipped-panel .pill{font-size:10px;padding:4px 6px}.skipped-panel small{font-size:11px}}
 </style></head>
 <body><header class="top"><a class="brand" href="/">◈ <span>TOUCHLINE<small>LIVE AUCTION</small></span></a><div id="connection" class="connection">Connecting…</div><button id="rating-toggle" class="quiet" hidden>Hide ratings</button></header><main id="app"><div class="panel">Connecting to Touchline…</div></main><div id="toast" role="status" aria-live="polite"></div><script>(function (scope) {
   const row = (positions, y, xs) => positions.map((position, i) => ({ position, x: xs[i], y }));
@@ -142,15 +143,19 @@ h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not
   function createGame(config, pool) {
     return { config: Object.freeze({ ...config, names: Object.freeze(config.names.slice()) }), pool,
       managers: config.names.map((name, i) => ({ id: `manager-${i + 1}`, name, board: Array(11).fill(null) })),
-      remaining: pool.map(entry => entry.id), currentId: null, phase: 'ready', sales: [], lastPassedId: null };
+      remaining: pool.map(entry => entry.id), skipped: [], returning: false, currentId: null, phase: 'ready', sales: [], lastPassedId: null };
   }
   const purchases = (game, managerId) => game.sales.filter(sale => sale.managerId === managerId);
   const budget = (game, managerId) => STARTING_BUDGET - purchases(game, managerId).reduce((total, sale) => total + sale.price, 0);
   function reveal(game, random = Math.random) {
     if (game.phase === 'revealed') return { error: 'Sell this player or pass before spinning again.' };
     if (!game.remaining.length) return { error: 'All players have been sold.' };
-    const choices = game.remaining.length > 1 ? game.remaining.filter(id => id !== game.lastPassedId) : game.remaining;
-    return { game: { ...game, currentId: choices[Math.floor(random() * choices.length)], phase: 'revealed', lastPassedId: null } };
+    const skipped = game.skipped || [], queued = new Set(skipped);
+    const choices = game.remaining.filter(id => !queued.has(id));
+    // New players finish their cycle first. Returns follow the saved skip order.
+    const returning = choices.length === 0;
+    const currentId = returning ? skipped[0] : choices[Math.floor(random() * choices.length)];
+    return { game: { ...game, currentId, returning, skipped: skipped.filter(id => id !== currentId), phase: 'revealed', lastPassedId: null } };
   }
   function buy(game, managerId, price) {
     if (game.phase !== 'revealed' || !game.currentId || !game.remaining.includes(game.currentId)) return { error: 'Spin to reveal a player first.' };
@@ -160,17 +165,17 @@ h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not
     if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
-    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
+    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
   }
   function pass(game) {
     if (game.phase !== 'revealed') return { error: 'There is no unsold player to pass.' };
-    return { game: { ...game, lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
+    return { game: { ...game, skipped: [...(game.skipped || []).filter(id => id !== game.currentId), game.currentId], lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
   }
   function undo(game) {
     if (!game.sales.length || !['sold', 'complete'].includes(game.phase)) return { error: 'You can undo the most recent sale before spinning again.' };
     const last = game.sales.at(-1);
     return { game: { ...game, sales: game.sales.slice(0, -1), remaining: [...game.remaining, last.playerId], currentId: last.playerId,
-      phase: 'revealed', lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
+      phase: 'revealed', returning: false, lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
   }
   function place(game, managerId, playerId, slot) {
     const manager = game.managers.find(item => item.id === managerId);
@@ -186,7 +191,8 @@ h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not
   }
   function serialise(game) {
     return { version: 1, config: game.config, pool: game.pool.map(entry => ({ id: entry.id, clubId: entry.season.clubId, season: entry.season.season, allocatedPosition: entry.allocatedPosition })),
-      managers: game.managers, remaining: game.remaining, currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
+      managers: game.managers, remaining: game.remaining, skipped: game.skipped || [], returning: game.returning === true,
+      currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
   }
   function restore(saved, players) {
     try {
@@ -225,8 +231,12 @@ h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not
       if (saved.phase === 'ready' && saved.currentId !== null) return null;
       if (['sold', 'complete'].includes(saved.phase) && saved.currentId !== game.sales.at(-1)?.playerId) return null;
       if ((saved.phase === 'complete') !== (game.remaining.length === 0)) return null;
+      // Old saves can retain their most recent pass; new saves preserve the whole queue.
+      const skipped = saved.skipped === undefined ? (game.remaining.includes(saved.lastPassedId) && saved.lastPassedId !== saved.currentId ? [saved.lastPassedId] : []) : saved.skipped;
+      if (!Array.isArray(skipped) || new Set(skipped).size !== skipped.length || skipped.some(id => !game.remaining.includes(id) || saved.phase === 'revealed' && id === saved.currentId)
+        || saved.returning !== undefined && typeof saved.returning !== 'boolean') return null;
       return { ...game, managers, remaining: saved.remaining.slice(), phase: saved.phase, currentId: saved.currentId,
-        lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
+        skipped: skipped.slice(), returning: saved.returning === true, lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
     } catch { return null; }
   }
   const api = { STARTING_BUDGET, shuffle, candidates, balance, makePool, createGame, purchases, budget, reveal, buy, pass, undo, place, unplace, serialise, restore };
@@ -501,6 +511,12 @@ h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not
     const ended = round && !open;
     return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span><span class="pill">${esc(player.player.positions.join(' / '))}</span>${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="decimal" type="number" min="${min / 10}" max="${myBudget() / 10}" step="0.1" placeholder="${min / 10}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>Place bid${leader?.managerId === room.me ? ' · you’re leading' : ''}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed)}>${out ? 'You’re out for this player' : myFull() ? 'Your XI is full' : 'Back out for this player'}</button><p class="hint">First bid starts 60 seconds. Every later bid adds 10 seconds. Backing out removes your bids; you cannot re-enter this player’s auction.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
   }
+  function skippedPlayers() {
+    const queued = room.game.skipped || [];
+    if (!queued.length) return '';
+    const unseen = room.game.unseenCount || 0;
+    return `<section id="skipped-players" class="panel stack skipped-panel"><div class="row"><h2>Skipped players</h2><span class="pill">${queued.length} waiting</span></div><p>${unseen ? `These players return after the ${unseen} remaining new player${unseen === 1 ? '' : 's'}.` : 'The new-player cycle is finished. These players are next, in the order below.'} Bid for them in the usual auction panel when they return.</p><div>${queued.map((id, index) => { const player = entry(id); return `<div class="sale-row" data-skipped="${esc(id)}"><span class="queue-number">${index + 1}</span><div class="queue-player"><strong>${esc(player.player.name)}</strong><small>${esc(player.player.positions.join(' / '))} · ${esc(player.club?.name)} · ${esc(player.season.season)}</small></div>${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}<span class="pill">${index === 0 ? 'First back' : 'Queued'}</span></div>`; }).join('')}</div><p class="hint">If everyone backs out again, the player moves to the end of this list.</p></section>`;
+  }
   function teamsScreen() {
     if (!room.game.managers.some(manager => manager.id === teamId)) teamId = room.me;
     const manager = room.game.managers.find(manager => manager.id === teamId), own = teamId === room.me, editable = own && !room.league;
@@ -527,6 +543,17 @@ h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not
     $('#rating-toggle').hidden = !room?.game; $('#rating-toggle').textContent = showRatings ? 'Hide ratings' : 'Show ratings';
     connection();
     $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen }[tab] || auctionScreen)();
+    if (room?.game && tab === 'auction') {
+      $('.auction-layout').insertAdjacentHTML('afterend', skippedPlayers());
+      if (room.round?.status === 'passed') $('.player-card .eyebrow').textContent = 'SKIPPED · QUEUED FOR LATER';
+      if (room.round?.returning) {
+        const label = $('.player-card .eyebrow');
+        if (label && room.round.status === 'open') label.textContent = clock() < room.round.opensAt ? 'Bringing back a skipped player' : 'BACK FOR BIDDING';
+      }
+      if (room.game.skipped?.length && room.game.unseenCount === 0 && room.round?.status !== 'open') {
+        const reveal = $('[data-do=reveal]'); if (reveal) reveal.textContent = 'Auction next skipped player →';
+      }
+    }
     if (room?.league && tab === 'league') {
       $('.scroll-table').classList.toggle('full-table', fullStats);
       $('.scroll-table').insertAdjacentHTML('afterend', `<button class="quiet mobile-stats" data-do="table-stats">${fullStats ? 'Show compact table' : 'Show full stats'}</button>`);

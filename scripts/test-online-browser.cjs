@@ -45,6 +45,22 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     assert.equal(await host.locator('.slot .paid').first().innerText(), '£12m');
     await host.locator('#rating-toggle').click(); assert.equal(await host.locator('.small-rating').count(), 0);
     await host.locator('nav [data-do=tab][data-id=transfers]').click(); assert.match(await host.locator('.sale-row').innerText(), /Blair/); assert.equal(await host.locator('.sale-row .rating').count(), 0);
+    await host.locator('nav [data-do=tab][data-id=auction]').click();
+    const skippedNames = [];
+    for (let index = 0; index < 2; index++) {
+      await host.locator('[data-do=reveal]').click(); await host.locator('#bid-value:not([disabled])').waitFor();
+      const name = await host.locator('.player-card h2').innerText();
+      assert(!skippedNames.includes(name)); skippedNames.push(name);
+      if (index === 0) {
+        for (const page of pages) { await page.locator('nav [data-do=tab][data-id=auction]').click(); await page.locator('[data-do=withdraw]').click(); }
+      } else await host.locator('[data-do=skip]').click();
+      await host.locator('[data-skipped]').nth(index).waitFor();
+      assert.deepEqual(await host.locator('[data-skipped] strong').allTextContents(), skippedNames);
+    }
+    await guest.reload(); await guest.locator('#skipped-players').waitFor();
+    assert.deepEqual(await guest.locator('[data-skipped] strong').allTextContents(), skippedNames);
+    assert.equal(await host.locator('#skipped-players .rating').count(), 0, 'Hidden ratings stay hidden in the queue');
+    await host.screenshot({ path: path.resolve(__dirname, '../preview-skipped-mobile.png'), fullPage: true });
     for (const width of [320, 390, 430, 1440]) for (const screen of ['auction', 'teams', 'transfers', 'league']) {
       await host.setViewportSize({ width, height: 900 }); await host.locator(`nav [data-do=tab][data-id=${screen}]`).click();
       assert(await host.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} must fit ${width}px`);
@@ -56,17 +72,36 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     await host.setViewportSize({ width: 390, height: 844 }); await host.locator('nav [data-do=tab][data-id=auction]').click();
     await host.screenshot({ path: path.resolve(__dirname, '../preview-online-mobile.png'), fullPage: true });
     const id = await host.evaluate(() => localStorage.getItem('touchline-online-room'));
-    // Fill remaining squads through validated server rules; exercise XI/league in the UI.
+    // Finish new players only, so the queued returns can be auctioned through the UI.
     await service.store.mutate(id, room => {
       const engine = require('../server/room-engine.cjs'), auction = require('../src/auction-core.js'); let now = Date.now();
-      while (room.status !== 'complete') {
+      while (room.game.remaining.some(playerId => !room.game.skipped.includes(playerId))) {
         room = engine.apply(room, room.hostUid, { type: 'reveal' }, now).room; now += 2000;
-        const winner = room.members.find(member => auction.purchases(room.game, member.managerId).length < 11);
+        const winner = room.members.slice().sort((a, b) => auction.purchases(room.game, a.managerId).length - auction.purchases(room.game, b.managerId).length)[0];
         room = engine.apply(room, winner.uid, { type: 'bid', price: 0 }, now).room;
         if (room.round.status === 'open') { now = room.round.deadline; room = engine.apply(room, null, { type: 'tick' }, now).room; }
       }
       return { room, changed: true };
     });
+    await host.locator('[data-do=reveal]').waitFor();
+    assert.match(await host.locator('[data-do=reveal]').innerText(), /skipped player/);
+    await host.locator('[data-do=reveal]').click(); await host.locator('.player-card .eyebrow').filter({ hasText: 'BACK FOR BIDDING' }).waitFor();
+    assert.equal(await host.locator('.player-card h2').innerText(), skippedNames[0]);
+    assert.equal(await host.locator('.player-card .eyebrow').innerText(), 'BACK FOR BIDDING');
+    assert.equal(await host.locator('#timer').innerText(), 'Waiting');
+    // Re-skipping rotates the queue and the other skipped player gets their turn.
+    await host.locator('[data-do=skip]').click();
+    assert.deepEqual(await host.locator('[data-skipped] strong').allTextContents(), [skippedNames[1], skippedNames[0]]);
+    for (const name of [skippedNames[1], skippedNames[0]]) {
+      await host.locator('[data-do=reveal]').click(); await host.locator('.player-card .eyebrow').filter({ hasText: 'BACK FOR BIDDING' }).waitFor();
+      assert.equal(await host.locator('.player-card h2').innerText(), name);
+      const current = await service.store.get(id), winner = current.members.find(member => require('../src/auction-core.js').purchases(current.game, member.managerId).length < 11);
+      const page = pages[current.members.indexOf(winner)];
+      await page.locator('#bid-value:not([disabled])').waitFor(); await page.locator('#bid-value').fill('0'); await page.locator('#bid-form .primary').click();
+      for (const other of pages.filter((_, index) => current.members[index].managerId !== winner.managerId && require('../src/auction-core.js').purchases(current.game, current.members[index].managerId).length < 11)) await other.locator('[data-do=withdraw]').click();
+      await host.waitForFunction(() => document.querySelector('.player-card')?.textContent.includes('signed them for'));
+    }
+    assert.equal(await host.locator('#skipped-players').count(), 0);
     for (const page of pages) { await page.locator('nav [data-do=tab][data-id=teams]').click(); await page.locator(`[data-do=team][data-id=manager-${pages.indexOf(page) + 1}]`).click(); await page.locator('[data-do=autoPlace]').click(); }
     await host.locator('nav [data-do=tab][data-id=league]').click(); await host.locator('[data-do=startLeague]').click();
     await guest.locator('nav [data-do=tab][data-id=league]').click(); assert.equal(await guest.locator('[data-do=playRound]').count(), 0);

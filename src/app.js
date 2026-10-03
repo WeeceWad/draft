@@ -178,6 +178,14 @@
       $('sale-result').hidden = true;
     }
     if (revealed) renderBid();
+    const skipped = game.skipped || [];
+    $('pass').textContent = 'No bids? Skip until the end of the cycle';
+    $('skipped-players').hidden = !skipped.length;
+    $('skipped-count').textContent = `${skipped.length} waiting`;
+    const unseen = game.remaining.filter(id => !skipped.includes(id) && !(game.phase === 'revealed' && id === game.currentId)).length;
+    $('skipped-note').textContent = unseen ? `They return after the ${unseen} remaining new players, in the order below.` : 'These players return next. Bid normally when each player comes back.';
+    $('skipped-list').innerHTML = skipped.map((id, index) => { const entry = entryFor(id); return `<div class="transfer-row"><span class="transfer-rank">${index + 1}</span><div><strong class="transfer-name">${escape(entry.player.name)}</strong><small class="transfer-meta">${escape(entry.player.positions.join(' / '))} · ${escape(entry.season.season)}</small></div>${showRatings ? `<span class="badge">${draft.rating(entry, game.config.mode)}</span>` : ''}</div>`; }).join('');
+    if (game.returning && current && !spinning && revealed) $('reveal-kicker').textContent = 'BACK FOR BIDDING';
   }
   function bidValue() {
     const raw = $('bid-price').value.trim();

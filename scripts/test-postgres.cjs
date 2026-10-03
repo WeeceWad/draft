@@ -47,8 +47,16 @@ async function storeFor(directory) {
     await store.mutate(id, room => engine.apply(room, null, { type: 'tick' }, now));
     room = await store.get(id); assert.equal(room.round.status, 'sold'); assert.equal(room.game.sales[0].managerId, leading);
     assert.equal((await store.due(now)).length, 0);
+    const skipped = [];
+    for (let index = 0; index < 2; index++) {
+      await act(uid, 'reveal'); now += 2000;
+      const current = (await store.get(id)).round.playerId;
+      assert(!skipped.includes(current)); skipped.push(current);
+      await act(uid, 'skip');
+    }
     await store.close(); store = null; store = await storeFor(directory);
     assert.equal((await store.get(id)).game.sales.length, 1);
+    assert.deepEqual((await store.get(id)).game.skipped, skipped, 'Skipped-player return order survives a database/server restart');
     await store.cleanup(now + 2 * 86400000); assert.equal(await store.get(id), null); assert.equal(await store.session(hash, now + 2 * 86400000), null);
     console.log('PostgreSQL SQL passed: schema, unique codes, atomic bids, rollback, persisted sessions/rooms/deadlines, restart settlement and cleanup (PGlite).');
   } finally { await store?.close(); fs.rmSync(directory, { recursive: true, force: true }); }

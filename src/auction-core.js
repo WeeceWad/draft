@@ -62,15 +62,19 @@
   function createGame(config, pool) {
     return { config: Object.freeze({ ...config, names: Object.freeze(config.names.slice()) }), pool,
       managers: config.names.map((name, i) => ({ id: `manager-${i + 1}`, name, board: Array(11).fill(null) })),
-      remaining: pool.map(entry => entry.id), currentId: null, phase: 'ready', sales: [], lastPassedId: null };
+      remaining: pool.map(entry => entry.id), skipped: [], returning: false, currentId: null, phase: 'ready', sales: [], lastPassedId: null };
   }
   const purchases = (game, managerId) => game.sales.filter(sale => sale.managerId === managerId);
   const budget = (game, managerId) => STARTING_BUDGET - purchases(game, managerId).reduce((total, sale) => total + sale.price, 0);
   function reveal(game, random = Math.random) {
     if (game.phase === 'revealed') return { error: 'Sell this player or pass before spinning again.' };
     if (!game.remaining.length) return { error: 'All players have been sold.' };
-    const choices = game.remaining.length > 1 ? game.remaining.filter(id => id !== game.lastPassedId) : game.remaining;
-    return { game: { ...game, currentId: choices[Math.floor(random() * choices.length)], phase: 'revealed', lastPassedId: null } };
+    const skipped = game.skipped || [], queued = new Set(skipped);
+    const choices = game.remaining.filter(id => !queued.has(id));
+    // New players finish their cycle first. Returns follow the saved skip order.
+    const returning = choices.length === 0;
+    const currentId = returning ? skipped[0] : choices[Math.floor(random() * choices.length)];
+    return { game: { ...game, currentId, returning, skipped: skipped.filter(id => id !== currentId), phase: 'revealed', lastPassedId: null } };
   }
   function buy(game, managerId, price) {
     if (game.phase !== 'revealed' || !game.currentId || !game.remaining.includes(game.currentId)) return { error: 'Spin to reveal a player first.' };
@@ -80,17 +84,17 @@
     if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
-    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
+    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
   }
   function pass(game) {
     if (game.phase !== 'revealed') return { error: 'There is no unsold player to pass.' };
-    return { game: { ...game, lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
+    return { game: { ...game, skipped: [...(game.skipped || []).filter(id => id !== game.currentId), game.currentId], lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
   }
   function undo(game) {
     if (!game.sales.length || !['sold', 'complete'].includes(game.phase)) return { error: 'You can undo the most recent sale before spinning again.' };
     const last = game.sales.at(-1);
     return { game: { ...game, sales: game.sales.slice(0, -1), remaining: [...game.remaining, last.playerId], currentId: last.playerId,
-      phase: 'revealed', lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
+      phase: 'revealed', returning: false, lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
   }
   function place(game, managerId, playerId, slot) {
     const manager = game.managers.find(item => item.id === managerId);
@@ -106,7 +110,8 @@
   }
   function serialise(game) {
     return { version: 1, config: game.config, pool: game.pool.map(entry => ({ id: entry.id, clubId: entry.season.clubId, season: entry.season.season, allocatedPosition: entry.allocatedPosition })),
-      managers: game.managers, remaining: game.remaining, currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
+      managers: game.managers, remaining: game.remaining, skipped: game.skipped || [], returning: game.returning === true,
+      currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
   }
   function restore(saved, players) {
     try {
@@ -145,8 +150,12 @@
       if (saved.phase === 'ready' && saved.currentId !== null) return null;
       if (['sold', 'complete'].includes(saved.phase) && saved.currentId !== game.sales.at(-1)?.playerId) return null;
       if ((saved.phase === 'complete') !== (game.remaining.length === 0)) return null;
+      // Old saves can retain their most recent pass; new saves preserve the whole queue.
+      const skipped = saved.skipped === undefined ? (game.remaining.includes(saved.lastPassedId) && saved.lastPassedId !== saved.currentId ? [saved.lastPassedId] : []) : saved.skipped;
+      if (!Array.isArray(skipped) || new Set(skipped).size !== skipped.length || skipped.some(id => !game.remaining.includes(id) || saved.phase === 'revealed' && id === saved.currentId)
+        || saved.returning !== undefined && typeof saved.returning !== 'boolean') return null;
       return { ...game, managers, remaining: saved.remaining.slice(), phase: saved.phase, currentId: saved.currentId,
-        lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
+        skipped: skipped.slice(), returning: saved.returning === true, lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
     } catch { return null; }
   }
   const api = { STARTING_BUDGET, shuffle, candidates, balance, makePool, createGame, purchases, budget, reveal, buy, pass, undo, place, unplace, serialise, restore };

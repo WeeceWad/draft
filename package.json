@@ -9,7 +9,7 @@
     "build": "node scripts/build.cjs && node scripts/build-online.cjs",
     "start": "node server/index.cjs",
     "dev": "node server/index.cjs",
-    "test": "node scripts/test-draft.cjs && node scripts/test-auction.cjs && node scripts/test-online.cjs && node scripts/test-server.cjs && node scripts/test-postgres.cjs",
+    "test": "node scripts/test-draft.cjs && node scripts/test-auction.cjs && node scripts/test-online.cjs && node scripts/test-skipped.cjs && node scripts/test-server.cjs && node scripts/test-postgres.cjs",
     "test:browser": "node scripts/test-online-browser.cjs"
   },
   "dependencies": {

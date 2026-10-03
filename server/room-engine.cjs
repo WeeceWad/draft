@@ -121,7 +121,7 @@ function apply(room, uid, command, now) {
       const result = auction.reveal(room.game, leagueCore.seeded((room.seed + (room.roundNumber + 1) * 7919) >>> 0));
       if (result.error) fail(result.error);
       room.game = result.game; room.roundNumber++;
-      room.round = { id: room.roundNumber, playerId: room.game.currentId, status: 'open', revealedAt: now, opensAt: now + 1600,
+      room.round = { id: room.roundNumber, playerId: room.game.currentId, returning: room.game.returning, status: 'open', revealedAt: now, opensAt: now + 1600,
         startedAt: null, deadline: null, offers: {}, withdrawn: [], bids: [], winnerId: null, price: null };
       break;
     }
@@ -202,10 +202,13 @@ function view(room, uid) {
   const me = member(room, uid);
   const round = room.round && { ...room.round, leader: leading(room) ? { managerId: leading(room)[0], price: leading(room)[1] } : null, active: active(room) };
   if (round) delete round.offers;
-  const known = room.game ? new Set([...room.game.sales.map(sale => sale.playerId), ...(room.round ? [room.round.playerId] : [])]) : new Set();
-  // Only current/sold identities leave the server; the remaining pool is private.
+  const skipped = room.game?.skipped || [];
+  const known = room.game ? new Set([...room.game.sales.map(sale => sale.playerId), ...skipped, ...(room.round ? [room.round.playerId] : [])]) : new Set();
+  // Only already revealed identities leave the server; unseen players stay private.
   const game = room.game && { config: room.game.config, managers: room.game.managers, sales: room.game.sales, phase: room.game.phase,
-    pool: room.game.pool.filter(entry => known.has(entry.id)).map(entryView), remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
+    pool: room.game.pool.filter(entry => known.has(entry.id)).map(entryView), skipped: skipped.slice(),
+    unseenCount: room.game.remaining.filter(id => !skipped.includes(id) && !(room.game.phase === 'revealed' && id === room.game.currentId)).length,
+    remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
   const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
     isHost: room.hostUid === uid, me: me.managerId, members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };

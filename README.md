@@ -20,7 +20,7 @@ The standalone `index.html` is a shared-device game for an in-person group. Its 
 
 - Each manager can buy at most 11 players. Nobody can spend more than their remaining budget.
 - Prices use £0.1m increments; £0 is allowed for a free transfer. Money is stored as integers to avoid rounding errors.
-- **Pass** returns an unsold player to the wheel. Passing never removes a player from the pool, and the next spin avoids immediately selecting the same player when others remain.
+- **Pass** queues an unsold player at the end of the cycle. Every new player appears before skipped players return, in skip order. The Auction screen shows the skipped-player list. Passing a returning player again moves them to the end of that list.
 - **Undo this sale** refunds the latest purchase and reopens that player's bidding. It is available until you spin again, including after the final sale.
 - All players are unique by player ID, even in season mode. In season mode the game chooses one eligible club-season per selected player.
 - The balanced pool covers every position in the chosen formation for every manager. It uses matching to account for versatile players and includes exactly one goalkeeper per manager. Settings that cannot produce a complete balanced pool are blocked.

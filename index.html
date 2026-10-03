@@ -136,6 +136,8 @@
   .fixture-score{font-size:23px}
   .champion h3{font-size:27px}
 }
+/* Unsold players wait until the new-player cycle ends. */
+.skipped-players{border-top:1px solid var(--border);margin-top:24px;padding-top:22px}.skipped-players h3{margin:0}.skipped-players .section-heading{margin-bottom:10px}
 </style></head>
 <body>
   <header class="topbar"><a class="brand" href="#"><span class="brand-icon">T</span>TOUCHLINE<span class="brand-sub">AUCTION NIGHT</span></a><span class="header-tag"><span class="live-dot"></span> Pass & play</span></header>
@@ -171,6 +173,7 @@
           <form id="bid-form" hidden novalidate><div class="bid-title"><h3>Record the winning bid</h3><span>Bid out loud with your mates</span></div><div id="winner-options" class="winner-options" aria-label="Choose the buyer"></div><div class="price-row"><label for="bid-price">Price paid</label><div class="price-input"><span>£</span><input id="bid-price" type="number" inputmode="decimal" min="0" max="100" step="0.1" value="1" aria-label="Winning bid in millions"><span>m</span></div></div><div class="price-presets"><button type="button" data-price="1">£1m</button><button type="button" data-price="5">£5m</button><button type="button" data-price="10">£10m</button><button type="button" data-price="20">£20m</button></div><p id="bid-error" class="error-message" role="status" aria-live="polite"></p><button id="sell" type="submit" class="primary-button" disabled>Confirm sale <span aria-hidden="true">→</span></button><button id="pass" type="button" class="text-button pass-button">No bids? Return player to the wheel</button></form>
           <div id="sold-actions" class="sold-actions" hidden><button id="next-player" class="primary-button">Next player <span aria-hidden="true">↻</span></button><button id="view-buyer" class="secondary-button">Place on team pitch →</button><button id="undo" class="text-button">Undo this sale</button></div>
           <div id="completion" class="completion" hidden><h3>That’s the auction!</h3><p>Arrange your XIs, reveal the bargains and big spends, then settle it on the pitch.</p><button id="review-teams" class="primary-button">Arrange the teams →</button><button id="review-auction" class="secondary-button">Awards & league →</button><button id="undo-final" class="text-button">Undo last sale</button></div>
+          <section id="skipped-players" class="skipped-players" hidden><div class="section-heading"><h3>Skipped players</h3><span id="skipped-count" class="badge"></span></div><p id="skipped-note" class="muted-note"></p><div id="skipped-list"></div></section>
         </section>
         <section id="team-panel" class="panel team-panel" aria-labelledby="team-title"><div class="section-heading"><div><p class="eyebrow">YOUR MONEY. YOUR PLAYERS.</p><h2 id="team-title"></h2></div><span id="team-formation" class="badge"></span></div><div id="team-tabs" class="team-tabs" aria-label="Select a manager’s team"></div><div class="team-stats"><div><strong id="team-players"></strong><small>PLAYERS BOUGHT</small></div><div><strong id="team-budget"></strong><small>REMAINING</small></div><div><strong id="team-average"></strong><small>AVG. RATING</small></div></div><p id="placement-help" class="placement-help" role="status" aria-live="polite">Tap a player below, then a spot on the pitch.</p><div id="pitch" class="pitch"><svg class="pitch-lines" viewBox="0 0 600 700" preserveAspectRatio="none" aria-hidden="true"><rect x="20" y="18" width="560" height="664" rx="2"/><path d="M20 350H580"/><circle cx="300" cy="350" r="72"/><circle class="spot" cx="300" cy="350" r="3"/><path d="M170 18V128H430V18M238 18V65H362V18M170 682V572H430V682M238 682V635H362V682"/><path d="M240 128Q300 178 360 128M240 572Q300 522 360 572"/><circle class="spot" cx="300" cy="100" r="3"/><circle class="spot" cx="300" cy="600" r="3"/></svg><div id="pitch-slots"></div><span class="pitch-watermark">TOUCHLINE</span></div><div class="roster-heading"><h3>Your players</h3><button id="deselect-player" class="text-button" hidden>Deselect</button></div><div id="owned-players" class="owned-players"></div></section>
         <section id="transfers-panel" class="panel transfers-panel" aria-labelledby="transfers-title"><div class="section-heading"><div><p class="eyebrow">THE DEAL SHEET</p><h2 id="transfers-title">Biggest buys</h2></div><span id="ledger-progress" class="badge"></span></div><p class="ledger-note">Every sale, from most to least expensive.</p><div id="transfers-list" class="transfers-list"></div></section>
@@ -336,15 +339,19 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
   function createGame(config, pool) {
     return { config: Object.freeze({ ...config, names: Object.freeze(config.names.slice()) }), pool,
       managers: config.names.map((name, i) => ({ id: `manager-${i + 1}`, name, board: Array(11).fill(null) })),
-      remaining: pool.map(entry => entry.id), currentId: null, phase: 'ready', sales: [], lastPassedId: null };
+      remaining: pool.map(entry => entry.id), skipped: [], returning: false, currentId: null, phase: 'ready', sales: [], lastPassedId: null };
   }
   const purchases = (game, managerId) => game.sales.filter(sale => sale.managerId === managerId);
   const budget = (game, managerId) => STARTING_BUDGET - purchases(game, managerId).reduce((total, sale) => total + sale.price, 0);
   function reveal(game, random = Math.random) {
     if (game.phase === 'revealed') return { error: 'Sell this player or pass before spinning again.' };
     if (!game.remaining.length) return { error: 'All players have been sold.' };
-    const choices = game.remaining.length > 1 ? game.remaining.filter(id => id !== game.lastPassedId) : game.remaining;
-    return { game: { ...game, currentId: choices[Math.floor(random() * choices.length)], phase: 'revealed', lastPassedId: null } };
+    const skipped = game.skipped || [], queued = new Set(skipped);
+    const choices = game.remaining.filter(id => !queued.has(id));
+    // New players finish their cycle first. Returns follow the saved skip order.
+    const returning = choices.length === 0;
+    const currentId = returning ? skipped[0] : choices[Math.floor(random() * choices.length)];
+    return { game: { ...game, currentId, returning, skipped: skipped.filter(id => id !== currentId), phase: 'revealed', lastPassedId: null } };
   }
   function buy(game, managerId, price) {
     if (game.phase !== 'revealed' || !game.currentId || !game.remaining.includes(game.currentId)) return { error: 'Spin to reveal a player first.' };
@@ -354,17 +361,17 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
-    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
+    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
   }
   function pass(game) {
     if (game.phase !== 'revealed') return { error: 'There is no unsold player to pass.' };
-    return { game: { ...game, lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
+    return { game: { ...game, skipped: [...(game.skipped || []).filter(id => id !== game.currentId), game.currentId], lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
   }
   function undo(game) {
     if (!game.sales.length || !['sold', 'complete'].includes(game.phase)) return { error: 'You can undo the most recent sale before spinning again.' };
     const last = game.sales.at(-1);
     return { game: { ...game, sales: game.sales.slice(0, -1), remaining: [...game.remaining, last.playerId], currentId: last.playerId,
-      phase: 'revealed', lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
+      phase: 'revealed', returning: false, lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
   }
   function place(game, managerId, playerId, slot) {
     const manager = game.managers.find(item => item.id === managerId);
@@ -380,7 +387,8 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
   }
   function serialise(game) {
     return { version: 1, config: game.config, pool: game.pool.map(entry => ({ id: entry.id, clubId: entry.season.clubId, season: entry.season.season, allocatedPosition: entry.allocatedPosition })),
-      managers: game.managers, remaining: game.remaining, currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
+      managers: game.managers, remaining: game.remaining, skipped: game.skipped || [], returning: game.returning === true,
+      currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
   }
   function restore(saved, players) {
     try {
@@ -419,8 +427,12 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
       if (saved.phase === 'ready' && saved.currentId !== null) return null;
       if (['sold', 'complete'].includes(saved.phase) && saved.currentId !== game.sales.at(-1)?.playerId) return null;
       if ((saved.phase === 'complete') !== (game.remaining.length === 0)) return null;
+      // Old saves can retain their most recent pass; new saves preserve the whole queue.
+      const skipped = saved.skipped === undefined ? (game.remaining.includes(saved.lastPassedId) && saved.lastPassedId !== saved.currentId ? [saved.lastPassedId] : []) : saved.skipped;
+      if (!Array.isArray(skipped) || new Set(skipped).size !== skipped.length || skipped.some(id => !game.remaining.includes(id) || saved.phase === 'revealed' && id === saved.currentId)
+        || saved.returning !== undefined && typeof saved.returning !== 'boolean') return null;
       return { ...game, managers, remaining: saved.remaining.slice(), phase: saved.phase, currentId: saved.currentId,
-        lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
+        skipped: skipped.slice(), returning: saved.returning === true, lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
     } catch { return null; }
   }
   const api = { STARTING_BUDGET, shuffle, candidates, balance, makePool, createGame, purchases, budget, reveal, buy, pass, undo, place, unplace, serialise, restore };
@@ -788,6 +800,14 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
       $('sale-result').hidden = true;
     }
     if (revealed) renderBid();
+    const skipped = game.skipped || [];
+    $('pass').textContent = 'No bids? Skip until the end of the cycle';
+    $('skipped-players').hidden = !skipped.length;
+    $('skipped-count').textContent = `${skipped.length} waiting`;
+    const unseen = game.remaining.filter(id => !skipped.includes(id) && !(game.phase === 'revealed' && id === game.currentId)).length;
+    $('skipped-note').textContent = unseen ? `They return after the ${unseen} remaining new players, in the order below.` : 'These players return next. Bid normally when each player comes back.';
+    $('skipped-list').innerHTML = skipped.map((id, index) => { const entry = entryFor(id); return `<div class="transfer-row"><span class="transfer-rank">${index + 1}</span><div><strong class="transfer-name">${escape(entry.player.name)}</strong><small class="transfer-meta">${escape(entry.player.positions.join(' / '))} · ${escape(entry.season.season)}</small></div>${showRatings ? `<span class="badge">${draft.rating(entry, game.config.mode)}</span>` : ''}</div>`; }).join('');
+    if (game.returning && current && !spinning && revealed) $('reveal-kicker').textContent = 'BACK FOR BIDDING';
   }
   function bidValue() {
     const raw = $('bid-price').value.trim();
