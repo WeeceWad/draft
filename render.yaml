@@ -1,12 +1,11 @@
 # Creates the live Node service and its persistent database together.
-# Paid plans keep the auction available; review Render's quoted costs before deploying.
+# Free hosting for trying the game. Free PostgreSQL expires after 30 days.
 services:
   - type: web
     name: touchline-auction
     runtime: node
     region: frankfurt
-    plan: 0.5c-512mb
-    numInstances: 1
+    plan: free
     buildCommand: npm ci --include=dev && npm run build && npm test
     startCommand: npm start
     healthCheckPath: /health
@@ -22,8 +21,7 @@ services:
 databases:
   - name: touchline-db
     region: frankfurt
-    plan: 0.1c-256mb
-    diskSizeGB: 1
+    plan: free
     databaseName: touchline
     user: touchline
     ipAllowList: []
