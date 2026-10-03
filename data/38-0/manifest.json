@@ -1,0 +1,57 @@
+{
+  "source": "https://38-0.app/game?new=true",
+  "scope": "Main English league game only",
+  "snapshotDate": "2026-10-02",
+  "generatedAtUtc": "2026-10-02T21:31:16.697Z",
+  "packedVersion": 3,
+  "sources": [
+    {
+      "file": "3yfu6xbm6ig3m.js",
+      "url": "https://38-0.app/_next/static/immutable/chunks/3yfu6xbm6ig3m.js",
+      "sha256": "358337ad261b7ffc6dee5ea6d35369850ac6c1c74fc8f2dc0f1582c17ea5af25"
+    },
+    {
+      "file": "0j0q7x4f-eu3w.js",
+      "url": "https://38-0.app/_next/static/immutable/chunks/0j0q7x4f-eu3w.js",
+      "sha256": "e222a591c0bb717d18047ab5210f463eca19f02aac34b5445e20caf303e234c7"
+    }
+  ],
+  "counts": {
+    "players": 4854,
+    "playerClubSeasons": 18522,
+    "clubs": 51,
+    "seasons": 35,
+    "clubSeasons": 706,
+    "squadOnlyRecords": 22,
+    "recordsOutsideSelectableClubSeasons": 3
+  },
+  "seasonRange": [
+    "1992/93",
+    "2026/27"
+  ],
+  "ratingRanges": {
+    "peak": [
+      40,
+      95
+    ],
+    "season": [
+      40,
+      95
+    ]
+  },
+  "validation": {
+    "matchedGameDecoder": true,
+    "matchedEverySeasonRating": true,
+    "matchedEveryPeakRating": true,
+    "uniquePlayerIds": true,
+    "uniquePlayerClubSeasonKeys": true,
+    "allSelectableClubSeasonsCovered": true
+  },
+  "notes": [
+    "Complete snapshot of the English PLAYERS array bundled with the public game on the snapshot date; not a claim of historical or future completeness.",
+    "Season mode uses the club-season rating; peak mode uses the player-level overall rating.",
+    "Positions are player-level in this source blob. squadOnly is a source flag, not an exclusion from the draft roster.",
+    "The source website describes these as its own independent ratings, not official EA/FIFA ratings.",
+    "Source terms restrict automated extraction and database reuse without permission; possession of this snapshot does not establish a reuse licence."
+  ]
+}

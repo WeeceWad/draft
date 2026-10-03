@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0c1018"><title>Touchline · Live auction</title><style>:root{color-scheme:dark;--bg:#0c1018;--panel:#151c28;--line:#2a3546;--muted:#97a6bd;--text:#f2f6fc;--green:#a3f670;--red:#ff9696}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}button,input,select{font:inherit}button,a,input,select{-webkit-tap-highlight-color:transparent}button{cursor:pointer;touch-action:manipulation}button:disabled{cursor:default;opacity:.38}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--green);outline-offset:3px}a{color:var(--green)}button,.button{min-height:46px;border:1px solid var(--line);border-radius:12px;padding:10px 16px;background:#212d3e;color:var(--text);font-weight:700;text-align:center;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px}.primary{background:var(--green);color:#13220d;border-color:var(--green)}.danger{color:var(--red)}.quiet{background:transparent}.top{max-width:1240px;margin:auto;display:flex;align-items:center;gap:14px;padding:20px 24px}.brand{text-decoration:none;display:flex;gap:8px;align-items:center;font-size:26px;font-weight:900;color:var(--green)}.brand span{font-size:17px;letter-spacing:2px;color:var(--text);line-height:1.3}.brand small{display:block;font-size:9px;letter-spacing:3px;color:var(--muted)}.connection{margin-left:auto;color:var(--muted);font-size:12px}.connection.live{color:var(--green)}main{max-width:1200px;padding:16px 24px 110px;margin:auto}h1,h2,h3,p{margin:0}h1{font-size:clamp(30px,6vw,48px);line-height:1.12;letter-spacing:-1.5px}h2{font-size:23px;line-height:1.25}h3{font-size:17px}p{color:var(--muted)}.eyebrow{font-size:11px;letter-spacing:2px;font-weight:800;text-transform:uppercase;color:var(--green)}.stack{display:grid;gap:16px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px}.hero{padding:24px 0 32px;max-width:700px}.hero p{margin-top:16px;font-size:17px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.wide{grid-column:1/-1}.row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions>*{flex:1}.field{display:grid;gap:7px}.field label,.label{font-weight:700;font-size:13px;color:#c2cee0}input:not([type=range]),select{background:#0c131f;color:var(--text);border:1px solid var(--line);border-radius:10px;min-height:48px;padding:10px 12px;width:100%;min-width:0}.code-input{font-size:30px;letter-spacing:12px;text-align:center;font-weight:800}.sliders{display:grid;gap:12px}.range-pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}.range-pair label{font-size:12px;color:var(--muted)}input[type=range]{width:100%;accent-color:var(--green);min-height:32px;margin:0}.pill{border-radius:999px;border:1px solid var(--line);padding:5px 10px;color:var(--muted);font-size:12px}.pill.green{color:var(--green);border-color:#47633c}.big-code{font-size:62px;letter-spacing:12px;line-height:1.2;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums}.member{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}.avatar{height:40px;width:40px;flex:none;display:grid;place-items:center;border-radius:12px;background:#27364a;font-weight:800}.member .grow{flex:1;min-width:0;overflow-wrap:anywhere}.member small{display:block;color:var(--muted)}.rules{font-size:13px}.room-head{margin-bottom:20px}.room-head h1{font-size:26px;letter-spacing:-.5px}.budget{font-size:25px;font-weight:800;color:var(--green)}.tabs{display:flex;gap:6px;padding:6px;background:#121a26;border:1px solid var(--line);border-radius:16px;margin-bottom:20px}.tabs button{flex:1;background:transparent;border:0;color:var(--muted);min-width:0;padding:10px}.tabs button.active{background:#2a394c;color:var(--text)}.auction-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:20px}.player-card{text-align:center;background:radial-gradient(ellipse at 50% 0,#2b4239,transparent 70%),var(--panel);min-height:315px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:12px}.player-card h2{font-size:clamp(27px,5vw,40px);overflow-wrap:anywhere}.player-symbol{font-size:60px;font-weight:900;height:88px;width:88px;display:grid;place-items:center;background:#a3f67016;border:1px solid #a3f67055;border-radius:25px;color:var(--green)}.player-meta{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}.rating{border-radius:8px;background:var(--green);padding:3px 8px;font-weight:900;color:#172711}.bid-price{font-size:38px;font-weight:900;letter-spacing:-1px;line-height:1.15}.timer{font-size:25px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--green)}.timer.urgent{color:var(--red)}.bid-form{display:grid;gap:12px}.bid-form input{font-size:24px;font-weight:800;text-align:center}.increments{display:flex;gap:8px}.increments button{flex:1;padding:8px}.bid-panel{display:grid;gap:20px}.hint{font-size:12px;color:var(--muted)}.bidders{display:flex;flex-wrap:wrap;gap:8px}.bidder{border:1px solid var(--line);padding:7px 10px;border-radius:10px;font-size:12px}.bidder.leader{border-color:var(--green);color:var(--green)}.bidder.out{opacity:.5}.spinner{animation:mystery .3s linear infinite}@keyframes mystery{0%{transform:rotate(-10deg) scale(.96)}50%{transform:rotate(10deg) scale(1.04)}100%{transform:rotate(-10deg) scale(.96)}}.sale-row{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}.sale-row strong{display:block;overflow-wrap:anywhere}.sale-row small{color:var(--muted)}.sale-row .price{white-space:nowrap;color:var(--green);font-weight:800}.scroll-table{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:12px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted)}th:nth-child(2),td:nth-child(2){text-align:left;min-width:90px}.points{color:var(--green);font-weight:900}.team-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,1fr);gap:20px}.team-picker{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px}.team-picker button{white-space:nowrap;flex:none}.team-picker .selected{background:var(--green);color:#13220d;border-color:var(--green)}.pitch{position:relative;aspect-ratio: .78;max-height:670px;width:100%;max-width:520px;margin:auto;border:1px solid #416754;border-radius:18px;overflow:hidden;background:repeating-linear-gradient(0deg,#153d30 0%,#153d30 10%,#194534 10%,#194534 20%)}.pitch:before{content:'';position:absolute;inset:6% 6%;border:1px solid #ffffff28;border-radius:3px}.pitch:after{content:'';position:absolute;top:50%;left:6%;right:6%;border-top:1px solid #ffffff28}.circle{position:absolute;border:1px solid #ffffff28;border-radius:50%;width:25%;aspect-ratio:1;left:37.5%;top:50%;transform:translateY(-50%)}.box{position:absolute;left:27%;width:46%;height:15%;border:1px solid #ffffff28}.box.top-box{top:6%}.box.bottom-box{bottom:6%}.slot{position:absolute;transform:translate(-50%,-50%);width:78px;max-width:20%;padding:4px 2px;min-height:54px;display:block;z-index:1;border:1px solid #6d8d7e;background:#102c23e8;border-radius:9px;color:var(--text);font-size:11px;line-height:1.2}.slot:disabled{opacity:1}.slot .role{display:block;color:#b6cdbe;font-size:9px;letter-spacing:.5px}.slot .name{display:block;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:3px 0}.slot .paid{color:var(--green);font-size:10px}.slot .small-rating{color:#e9fba7;font-size:10px}.slot.misplaced{border-color:#ffad65}.slot.selected{outline:3px solid var(--green)}.squad-list{display:grid;gap:8px}.squad-player{justify-content:space-between;min-height:60px;font-size:13px;text-align:left;font-weight:400}.squad-player strong{font-weight:800;display:block}.squad-player small{color:var(--muted);font-size:11px}.squad-player.selected{border-color:var(--green);background:#243c2c}.squad-player.placed{opacity:.7}.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat{text-align:center;background:#0e1520;border-radius:10px;padding:10px 4px;font-size:11px;color:var(--muted)}.stat strong{display:block;color:var(--text);font-size:20px}.award{padding:20px;border:1px solid var(--line);border-radius:15px;background:linear-gradient(135deg,#213129,var(--panel))}.award strong{display:block;font-size:20px;overflow-wrap:anywhere;margin-top:6px}.fixture{padding:15px 0;border-bottom:1px solid var(--line)}.fixture .score{font-size:22px;white-space:nowrap;font-weight:900;color:var(--green)}.fixture .team-name{flex:1;min-width:0;overflow-wrap:anywhere}.fixture .team-name:last-child{text-align:right}.fixture .row{flex-wrap:nowrap}.fixture small{display:block;margin-top:7px;color:var(--muted);font-size:11px}#toast{position:fixed;z-index:100;left:50%;bottom:94px;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 32px);padding:12px 18px;border-radius:12px;background:#344055;color:white;box-shadow:0 8px 25px #0008;opacity:0;pointer-events:none;transition:opacity .2s}#toast.visible{opacity:1}.muted{color:var(--muted)}.gap-top{margin-top:16px}.empty{padding:30px 12px;text-align:center;color:var(--muted)}.footer-actions{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}.footer-actions button{flex:1}.error-panel{border-color:var(--red)}
+@media(min-width:800px){.bid-panel{position:sticky;top:20px;align-self:start}.auction-layout>.stack{grid-column:1}.auction-layout>.bid-panel{grid-column:2;grid-row:1/3}.home-panels{max-width:940px}.settings{max-width:850px}.lobby-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:799px){.top{padding:14px 16px;gap:8px}.top #rating-toggle{padding:5px 8px;min-height:38px;font-size:11px}.brand span{font-size:13px;letter-spacing:1.5px}.brand small{font-size:8px;letter-spacing:2px}.connection{font-size:10px}main{padding:8px 16px 105px}.grid,.auction-layout,.team-layout{grid-template-columns:1fr;gap:14px}.panel{padding:18px;border-radius:17px}.hero{padding:18px 0 24px}.hero p{font-size:15px}.tabs{position:fixed;bottom:0;left:0;right:0;border-radius:0;z-index:20;margin:0;padding:7px 10px calc(7px + env(safe-area-inset-bottom));background:#111925f5;backdrop-filter:blur(16px);border-width:1px 0 0}.tabs button{font-size:12px;padding:10px 5px}.player-card{min-height:235px;gap:8px}.player-symbol{height:64px;width:64px;font-size:42px;border-radius:18px}.player-card h2{font-size:28px}.room-head{margin-bottom:12px}.room-head h1{font-size:22px}.budget{font-size:22px}.bid-panel{gap:14px}.big-code{font-size:56px;letter-spacing:9px}.pitch{max-width:430px}.slot{font-size:10px;width:68px;min-height:50px}.slot .paid,.slot .small-rating{font-size:9px}.stat strong{font-size:18px}.bid-price{font-size:32px}.player-meta .pill{padding:3px 8px}.footer-actions button{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.spinner{animation:none}*{scroll-behavior:auto}}
+.mystery-wheel{position:relative;width:180px;height:180px;margin:8px auto 12px}.wheel-disc{position:absolute;inset:0;border:6px solid #344a3d;border-radius:50%;background:repeating-conic-gradient(#a3f670 0deg 15deg,#254a35 15deg 30deg,#62894d 30deg 45deg,#172c22 45deg 60deg);box-shadow:0 0 0 5px #0d1b13,0 10px 30px #0005}.wheel-centre{position:absolute;inset:32%;display:grid;place-items:center;background:#121e17;border:5px solid #344a3d;border-radius:50%;font-size:34px;font-weight:900;color:var(--green)}.wheel-arrow{position:absolute;left:50%;top:-9px;transform:translateX(-50%);width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-top:24px solid #ecffd7;z-index:2}.wheel-disc.spinner{animation:wheel-spin 1.6s cubic-bezier(.14,.7,.18,1) forwards}@keyframes wheel-spin{to{transform:rotate(1320deg)}}@media(prefers-reduced-motion:reduce){.wheel-disc.spinner{animation:none}}@media(max-width:799px){.mystery-wheel{width:145px;height:145px}.player-card:has(.mystery-wheel){min-height:310px}input:not([type=range]),select{font-size:16px}}
+@media(max-width:799px){.auction-layout>.stack{display:contents}.auction-layout .player-card{order:0}.auction-layout>.bid-panel{order:1}.auction-layout>.stack>.panel:not(.player-card){order:2}}
+.mobile-stats{display:none}@media(max-width:799px){.mobile-stats{display:inline-flex}.scroll-table:not(.full-table) :is(th,td):nth-child(n+4):nth-child(-n+8){display:none}}
+h1,h2,h3,strong{overflow-wrap:anywhere}@media(max-width:799px){.scroll-table:not(.full-table) table{table-layout:fixed}.scroll-table:not(.full-table) :is(th,td):nth-child(2){width:44%;min-width:0;white-space:normal;overflow-wrap:anywhere}}
+</style></head>
+<body><header class="top"><a class="brand" href="/">◈ <span>TOUCHLINE<small>LIVE AUCTION</small></span></a><div id="connection" class="connection">Connecting…</div><button id="rating-toggle" class="quiet" hidden>Hide ratings</button></header><main id="app"><div class="panel">Connecting to Touchline…</div></main><div id="toast" role="status" aria-live="polite"></div><script>(function (scope) {
+  const row = (positions, y, xs) => positions.map((position, i) => ({ position, x: xs[i], y }));
+  const point = (position, x, y) => ({ position, x, y });
+  const backFour = row(['LB', 'CB', 'CB', 'RB'], 72, [12, 32, 68, 88]);
+  const backThree = [point('CB', 30, 72), point('CB', 50, 66), point('CB', 70, 72)];
+  const backFive = [point('LWB', 10, 63), ...backThree, point('RWB', 90, 63)];
+  const keeper = point('GK', 50, 88);
+  const formations = {
+    // Keep the original slot order so saved teams retain their assigned positions.
+    '4-3-3': [...row(['LW', 'ST', 'RW'], 12, [18, 50, 82]), point('CM', 24, 43), point('CDM', 50, 55), point('CM', 76, 43), ...backFour, keeper],
+    '4-4-2': [...row(['ST', 'ST'], 15, [35, 65]), ...row(['LM', 'CM', 'CM', 'RM'], 44, [14, 38, 62, 86]), ...backFour, keeper],
+    '4-2-3-1': [point('ST', 50, 10), point('LM', 16, 35), point('CAM', 50, 31), point('RM', 84, 35), ...row(['CDM', 'CDM'], 53, [35, 65]), ...backFour, keeper],
+    '3-5-2': [...row(['ST', 'ST'], 12, [35, 65]), point('CAM', 50, 32), ...row(['LWB', 'CM', 'CM', 'RWB'], 49, [10, 30, 70, 90]), ...backThree, keeper],
+    '4-3-2-1': [point('ST', 50, 10), ...row(['LW', 'RW'], 29, [30, 70]), point('CM', 24, 49), point('CDM', 50, 57), point('CM', 76, 49), ...backFour, keeper],
+    '4-3-3 (flat)': [...row(['LW', 'ST', 'RW'], 12, [18, 50, 82]), ...row(['CM', 'CM', 'CM'], 45, [24, 50, 76]), ...backFour, keeper],
+    '4-3-3 (attacking)': [...row(['LW', 'ST', 'RW'], 10, [18, 50, 82]), point('CM', 25, 49), point('CAM', 50, 32), point('CM', 75, 49), ...backFour, keeper],
+    '4-1-2-1-2 (diamond)': [...row(['ST', 'ST'], 11, [33, 67]), point('CAM', 50, 31), ...row(['CM', 'CM'], 45, [24, 76]), point('CDM', 50, 55), ...backFour, keeper],
+    '4-1-2-1-2 (wide)': [...row(['ST', 'ST'], 11, [33, 67]), point('CAM', 50, 31), ...row(['LM', 'RM'], 45, [14, 86]), point('CDM', 50, 55), ...backFour, keeper],
+    '4-1-4-1': [point('ST', 50, 10), ...row(['LM', 'CM', 'CM', 'RM'], 34, [12, 36, 64, 88]), point('CDM', 50, 55), ...backFour, keeper],
+    '4-4-1-1': [point('ST', 50, 10), point('CAM', 50, 31), ...row(['LM', 'CM', 'CM', 'RM'], 51, [12, 36, 64, 88]), ...backFour, keeper],
+    '4-2-2-2': [...row(['ST', 'ST'], 11, [33, 67]), ...row(['CAM', 'CAM'], 33, [24, 76]), ...row(['CDM', 'CDM'], 53, [35, 65]), ...backFour, keeper],
+    '4-5-1': [point('ST', 50, 12), point('LM', 10, 37), ...row(['CM', 'CM', 'CM'], 47, [30, 50, 70]), point('RM', 90, 37), ...backFour, keeper],
+    '3-4-3': [...row(['LW', 'ST', 'RW'], 12, [18, 50, 82]), ...row(['LWB', 'CM', 'CM', 'RWB'], 43, [10, 35, 65, 90]), ...backThree, keeper],
+    '3-4-2-1': [point('ST', 50, 10), ...row(['CAM', 'CAM'], 29, [28, 72]), ...row(['LWB', 'CM', 'CM', 'RWB'], 50, [10, 30, 70, 90]), ...backThree, keeper],
+    '3-4-1-2': [...row(['ST', 'ST'], 11, [33, 67]), point('CAM', 50, 31), ...row(['LWB', 'CM', 'CM', 'RWB'], 49, [10, 30, 70, 90]), ...backThree, keeper],
+    '3-5-2 (holding)': [...row(['ST', 'ST'], 12, [35, 65]), ...row(['CM', 'CM'], 34, [28, 72]), point('LWB', 10, 47), point('CDM', 50, 46), point('RWB', 90, 47), ...backThree, keeper],
+    '5-3-2': [...row(['ST', 'ST'], 12, [35, 65]), point('CM', 24, 37), point('CDM', 50, 46), point('CM', 76, 37), ...backFive, keeper],
+    '5-2-1-2': [...row(['ST', 'ST'], 11, [33, 67]), point('CAM', 50, 31), ...row(['CM', 'CM'], 47, [28, 72]), ...backFive, keeper],
+    '5-4-1': [point('ST', 50, 12), ...row(['LM', 'CM', 'CM', 'RM'], 40, [12, 36, 64, 88]), ...backFive, keeper],
+  };
+  const equivalents = { LW: ['LW', 'LM'], LM: ['LM', 'LW'], RW: ['RW', 'RM'], RM: ['RM', 'RW'], LB: ['LB', 'LWB'], LWB: ['LWB', 'LB'], RB: ['RB', 'RWB'], RWB: ['RWB', 'RB'] };
+  const fits = (player, position) => (equivalents[position] || [position]).some(item => player.positions.includes(item));
+  const rating = (entry, mode) => mode === 'season' ? entry.season.seasonRating : entry.player.peakRating;
+  function remap(squad, oldFormation, nextFormation) {
+    const candidates = squad.map((entry, i) => ({ entry, index: i, position: formations[oldFormation][i].position }));
+    const memo = new Map();
+    // Find the best complete assignment so retaining one position cannot block
+    // another player's only compatible position. Keep all picks even when a new
+    // formation cannot accommodate everyone; the UI flags those mismatches.
+    function best(i, mask) {
+      if (i === 11) return { score: 0, indexes: [] };
+      if (memo.has(mask)) return memo.get(mask);
+      const slot = formations[nextFormation][i];
+      let result = { score: -Infinity, indexes: [] };
+      candidates.forEach((candidate, index) => {
+        if (mask & (1 << index)) return;
+        const compatible = candidate.entry && fits(candidate.entry.player, slot.position);
+        const score = (compatible ? 1000 : 0) + (compatible && candidate.position === slot.position ? 20 : 0) + (candidate.index === i ? 1 : 0);
+        const next = best(i + 1, mask | (1 << index));
+        if (score + next.score > result.score) result = { score: score + next.score, indexes: [index, ...next.indexes] };
+      });
+      memo.set(mask, result);
+      return result;
+    }
+    return best(0, 0).indexes.map(index => candidates[index].entry);
+  }
+  function draft(squad, formation, selected, entry) {
+    if (squad.some(item => item?.player.id === entry.player.id)) return { error: 'This player is already in your XI.' };
+    const slots = formations[formation];
+    const target = selected === null ? slots.findIndex((slot, i) => !squad[i] && fits(entry.player, slot.position)) : selected;
+    if (target < 0) return { error: 'No empty position fits this player. Select a filled position to replace someone.' };
+    if (!fits(entry.player, slots[target].position)) return { error: `${entry.player.name} does not play ${slots[target].position}. Select a matching position.` };
+    const next = squad.slice();
+    next[target] = entry;
+    return { squad: next, target };
+  }
+  const api = { formations, fits, rating, remap, draft };
+  if (typeof module !== 'undefined') module.exports = api;
+  else scope.DraftCore = api;
+})(globalThis);
+</script><script>(function (scope) {
+  const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
+  const STARTING_BUDGET = 1000; // Tenths of a million: integer arithmetic avoids rounding errors.
+  function shuffle(items, random = Math.random) {
+    const copy = items.slice();
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }
+  function candidates(players, config) {
+    return players.flatMap(player => {
+      if (config.mode === 'peak' && (player.peakRating < config.ratingMin || player.peakRating > config.ratingMax)) return [];
+      const seasons = player.clubSeasons.filter(season => season.season >= config.seasonFrom && season.season <= config.seasonTo
+        && (config.mode !== 'season' || (season.seasonRating >= config.ratingMin && season.seasonRating <= config.ratingMax)));
+      return seasons.length ? [{ player, seasons }] : [];
+    });
+  }
+  function balance(eligible, formation, managerCount, random = Math.random) {
+    const shape = draft.formations[formation];
+    if (!shape || !Number.isInteger(managerCount) || managerCount < 2 || managerCount > 8) return { error: 'Choose a formation and between 2 and 8 managers.' };
+    if (eligible.length < managerCount * 11) return { error: `You need at least ${managerCount * 11} different players. Widen your season or rating range.` };
+    const needs = Array.from({ length: managerCount }, () => shape.map(slot => slot.position)).flat();
+    const byPosition = new Map();
+    for (const position of new Set(needs)) {
+      const indexes = eligible.flatMap((entry, i) => {
+        const goalkeeper = entry.player.positions.includes('GK');
+        return (position === 'GK' ? goalkeeper : !goalkeeper && draft.fits(entry.player, position)) ? [i] : [];
+      });
+      const required = needs.filter(item => item === position).length;
+      if (indexes.length < required) return { error: `This pool needs ${required} ${position} players, but only ${indexes.length} qualify. Widen your season or rating range.` };
+      byPosition.set(position, shuffle(indexes, random));
+    }
+    const assigned = Array(needs.length).fill(-1);
+    const taken = new Map();
+    // Randomised bipartite matching accounts for versatile players without
+    // counting the same footballer twice toward positional quotas.
+    function find(slot, visited) {
+      for (const index of byPosition.get(needs[slot])) {
+        if (visited.has(index)) continue;
+        visited.add(index);
+        if (!taken.has(index) || find(taken.get(index), visited)) {
+          taken.set(index, slot); assigned[slot] = index; return true;
+        }
+      }
+      return false;
+    }
+    const order = needs.map((_, i) => i).sort((a, b) => byPosition.get(needs[a]).length - byPosition.get(needs[b]).length);
+    for (const slot of order) if (!find(slot, new Set())) return { error: 'There are not enough different players to cover all positions. Widen your season or rating range.' };
+    return { assigned, needs };
+  }
+  function makePool(players, config, random = Math.random) {
+    const eligible = candidates(players, config);
+    const result = balance(eligible, config.formation, config.managerCount, random);
+    if (result.error) return result;
+    const pool = result.assigned.map((index, slot) => {
+      const entry = eligible[index];
+      return { id: entry.player.id, player: entry.player, season: entry.seasons[Math.floor(random() * entry.seasons.length)], allocatedPosition: result.needs[slot] };
+    });
+    return { pool: shuffle(pool, random) };
+  }
+  function createGame(config, pool) {
+    return { config: Object.freeze({ ...config, names: Object.freeze(config.names.slice()) }), pool,
+      managers: config.names.map((name, i) => ({ id: `manager-${i + 1}`, name, board: Array(11).fill(null) })),
+      remaining: pool.map(entry => entry.id), currentId: null, phase: 'ready', sales: [], lastPassedId: null };
+  }
+  const purchases = (game, managerId) => game.sales.filter(sale => sale.managerId === managerId);
+  const budget = (game, managerId) => STARTING_BUDGET - purchases(game, managerId).reduce((total, sale) => total + sale.price, 0);
+  function reveal(game, random = Math.random) {
+    if (game.phase === 'revealed') return { error: 'Sell this player or pass before spinning again.' };
+    if (!game.remaining.length) return { error: 'All players have been sold.' };
+    const choices = game.remaining.length > 1 ? game.remaining.filter(id => id !== game.lastPassedId) : game.remaining;
+    return { game: { ...game, currentId: choices[Math.floor(random() * choices.length)], phase: 'revealed', lastPassedId: null } };
+  }
+  function buy(game, managerId, price) {
+    if (game.phase !== 'revealed' || !game.currentId || !game.remaining.includes(game.currentId)) return { error: 'Spin to reveal a player first.' };
+    const manager = game.managers.find(manager => manager.id === managerId);
+    if (!manager) return { error: 'Choose the winning manager.' };
+    if (!Number.isInteger(price) || price < 0) return { error: 'Enter a price in £0.1m increments, including £0 for a free transfer.' };
+    if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
+    if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
+    const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
+    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
+  }
+  function pass(game) {
+    if (game.phase !== 'revealed') return { error: 'There is no unsold player to pass.' };
+    return { game: { ...game, lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
+  }
+  function undo(game) {
+    if (!game.sales.length || !['sold', 'complete'].includes(game.phase)) return { error: 'You can undo the most recent sale before spinning again.' };
+    const last = game.sales.at(-1);
+    return { game: { ...game, sales: game.sales.slice(0, -1), remaining: [...game.remaining, last.playerId], currentId: last.playerId,
+      phase: 'revealed', lastPassedId: null, managers: game.managers.map(manager => ({ ...manager, board: manager.board.map(id => id === last.playerId ? null : id) })) } };
+  }
+  function place(game, managerId, playerId, slot) {
+    const manager = game.managers.find(item => item.id === managerId);
+    if (!manager || !purchases(game, managerId).some(sale => sale.playerId === playerId)) return { error: 'This player belongs to another manager.' };
+    if (!Number.isInteger(slot) || slot < 0 || slot >= 11) return { error: 'Choose a spot on the pitch.' };
+    const board = manager.board.slice(), from = board.indexOf(playerId), displaced = board[slot];
+    if (from >= 0) board[from] = displaced;
+    board[slot] = playerId;
+    return { game: { ...game, managers: game.managers.map(item => item.id === managerId ? { ...item, board } : item) } };
+  }
+  function unplace(game, managerId, playerId) {
+    return { ...game, managers: game.managers.map(manager => manager.id === managerId ? { ...manager, board: manager.board.map(id => id === playerId ? null : id) } : manager) };
+  }
+  function serialise(game) {
+    return { version: 1, config: game.config, pool: game.pool.map(entry => ({ id: entry.id, clubId: entry.season.clubId, season: entry.season.season, allocatedPosition: entry.allocatedPosition })),
+      managers: game.managers, remaining: game.remaining, currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
+  }
+  function restore(saved, players) {
+    try {
+      const config = saved.config;
+      if (saved.version !== 1 || !draft.formations[config.formation] || !['peak', 'season'].includes(config.mode)
+        || !Number.isInteger(config.managerCount) || config.managerCount < 2 || config.managerCount > 8
+        || config.names.length !== config.managerCount || config.names.some(name => typeof name !== 'string' || !name.trim() || name.length > 24)
+        || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax) || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax
+        || config.seasonFrom > config.seasonTo) return null;
+      const playerMap = new Map(players.map(player => [player.id, player]));
+      const pool = saved.pool.map(record => {
+        const player = playerMap.get(record.id);
+        const season = player.clubSeasons.find(season => season.clubId === record.clubId && season.season === record.season);
+        if (!season || !candidates([{ ...player, clubSeasons: [season] }], config).length) throw Error('Invalid saved pool');
+        return { id: player.id, player, season, allocatedPosition: record.allocatedPosition };
+      });
+      if (pool.length !== config.managerCount * 11 || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
+      let game = createGame(config, pool);
+      // Replay sales through normal validation to rebuild budgets and ownership.
+      for (const sale of saved.sales) {
+        if (!game.remaining.includes(sale.playerId)) return null;
+        const result = buy({ ...game, phase: 'revealed', currentId: sale.playerId }, sale.managerId, sale.price);
+        if (result.error) return null;
+        game = result.game;
+      }
+      if (saved.managers.length !== config.managerCount || !['ready', 'revealed', 'sold', 'complete'].includes(saved.phase)) return null;
+      const managers = game.managers.map((manager, i) => {
+        const record = saved.managers[i], owned = new Set(purchases(game, manager.id).map(sale => sale.playerId));
+        if (record.id !== manager.id || record.board.length !== 11 || record.board.some(id => id !== null && !owned.has(id))
+          || new Set(record.board.filter(id => id !== null)).size !== record.board.filter(id => id !== null).length) throw Error('Invalid saved board');
+        return { ...manager, board: record.board.slice() };
+      });
+      if (!Array.isArray(saved.remaining) || saved.remaining.length !== game.remaining.length
+        || new Set(saved.remaining).size !== saved.remaining.length || saved.remaining.some(id => !game.remaining.includes(id))) return null;
+      if (saved.phase === 'revealed' && !game.remaining.includes(saved.currentId)) return null;
+      if (saved.phase === 'ready' && saved.currentId !== null) return null;
+      if (['sold', 'complete'].includes(saved.phase) && saved.currentId !== game.sales.at(-1)?.playerId) return null;
+      if ((saved.phase === 'complete') !== (game.remaining.length === 0)) return null;
+      return { ...game, managers, remaining: saved.remaining.slice(), phase: saved.phase, currentId: saved.currentId,
+        lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
+    } catch { return null; }
+  }
+  const api = { STARTING_BUDGET, shuffle, candidates, balance, makePool, createGame, purchases, budget, reveal, buy, pass, undo, place, unplace, serialise, restore };
+  if (typeof module !== 'undefined') module.exports = api; else scope.AuctionCore = api;
+})(globalThis);
+</script><script>(function (scope) {
+  const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
+  const auction = typeof module !== 'undefined' ? require('./auction-core.js') : scope.AuctionCore;
+  const VERSION = 'touchline-head-to-head-v1';
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const units = { GK: 'goalkeeping', CB: 'defence', LB: 'defence', RB: 'defence', CM: 'midfield', CDM: 'midfield', LM: 'midfield', RM: 'midfield', CAM: 'attack', LW: 'attack', RW: 'attack', ST: 'attack' };
+  const unitWeights = { attack: .30, midfield: .30, defence: .28, goalkeeping: .12 };
+  const scorerWeights = { GK: 0, CB: 1, LB: 2, RB: 2, LWB: 2, RWB: 2, CDM: 3, CM: 8, CAM: 13, LM: 9, RM: 9, LW: 15, RW: 15, ST: 20 };
+  const defensive = new Set(['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB', 'CDM']);
+  // Observed browser defaults, independently implemented. See docs/simulation-research.md.
+  function naturalRank(position, positions) {
+    if (!positions?.length) return -1;
+    if (position === 'LW' || position === 'RW') {
+      const wide = position === 'LW' ? 'LM' : 'RM';
+      const attacking = ['ST', 'CAM', 'LW', 'RW', 'LM', 'RM'].includes(positions[0]);
+      return positions.findIndex(role => role === position || (role === wide && attacking));
+    }
+    if (position === 'CDM' || position === 'CAM') {
+      const opposite = position === 'CDM' ? 'CAM' : 'CDM';
+      return positions.findIndex(role => role === position || (role === 'CM' && !positions.includes(opposite)));
+    }
+    if (position === 'LWB' || position === 'RWB') {
+      const exact = positions.indexOf(position);
+      if (exact >= 0) return exact;
+      const roles = position === 'LWB' ? ['LB', 'LM'] : ['RB', 'RM'];
+      if (roles.includes(positions[0])) return 0;
+      return positions[0] === (position === 'LWB' ? 'LW' : 'RW') ? 2 : -1;
+    }
+    const compatible = { LM: ['LM', 'LW'], RM: ['RM', 'RW'], CM: ['CM', 'CAM', 'CDM'] };
+    return positions.findIndex(role => (compatible[position] || [position]).includes(role));
+  }
+  function fitMultiplier(position, positions) {
+    const rank = naturalRank(position, positions);
+    return rank === 0 ? 1 : rank === 1 ? .99 : rank >= 2 ? .98 : .93;
+  }
+  function team(game, manager) {
+    const slots = draft.formations[game.config.formation];
+    const pool = new Map(game.pool.map(entry => [entry.id, entry]));
+    const backFive = slots.filter(slot => slot.position === 'CB').length === 3 && game.config.formation.startsWith('5-');
+    const squad = slots.flatMap((slot, index) => {
+      const entry = pool.get(manager.board[index]);
+      if (!entry) return [];
+      const rating = draft.rating(entry, game.config.mode), fit = fitMultiplier(slot.position, entry.player.positions);
+      const unit = ['LWB', 'RWB'].includes(slot.position) ? (backFive ? 'defence' : 'midfield') : units[slot.position];
+      return [{ id: entry.id, name: entry.player.name, position: slot.position, positions: entry.player.positions.slice(), rating, effective: Math.max(40, rating * fit), fit, unit }];
+    });
+    const exact = {};
+    for (const unit of Object.keys(unitWeights)) {
+      const players = squad.filter(player => player.unit === unit);
+      const weight = player => unit === 'defence' && player.position !== 'CB' ? .6 : 1;
+      exact[unit] = players.length ? players.reduce((sum, player) => sum + player.effective * weight(player), 0) / players.reduce((sum, player) => sum + weight(player), 0) : 0;
+    }
+    const present = Object.keys(unitWeights).filter(unit => exact[unit] > 0);
+    const denominator = present.reduce((sum, unit) => sum + unitWeights[unit], 0);
+    const overall = denominator ? Math.round(present.reduce((sum, unit) => sum + exact[unit] * unitWeights[unit], 0) / denominator) : 0;
+    return { id: manager.id, name: manager.name, board: manager.board.slice(), squad, overall,
+      ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])),
+      placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length,
+      spent: auction.STARTING_BUDGET - auction.budget(game, manager.id) };
+  }
+  function readiness(game) {
+    if (game.phase !== 'complete') return { ready: false, message: 'Finish the auction before starting your league.' };
+    const incomplete = game.managers.filter(manager => manager.board.filter(Boolean).length !== 11);
+    return incomplete.length ? { ready: false, message: `Place all 11 players for ${incomplete.map(manager => manager.name).join(', ')}.`, managerId: incomplete[0].id }
+      : { ready: true, message: 'Every XI is ready. Starting locks the teams for this league.' };
+  }
+  function schedule(ids) {
+    const ring = ids.slice();
+    if (ring.length % 2) ring.push(null);
+    const first = [];
+    for (let round = 0; round < ring.length - 1; round++) {
+      const fixtures = [];
+      for (let index = 0; index < ring.length / 2; index++) {
+        const left = ring[index], right = ring[ring.length - 1 - index];
+        if (!left || !right) continue;
+        const swap = (round + index) % 2;
+        fixtures.push({ homeId: swap ? right : left, awayId: swap ? left : right });
+      }
+      first.push(fixtures);
+      ring.splice(1, 0, ring.pop());
+    }
+    return [...first, ...first.map(fixtures => fixtures.map(fixture => ({ homeId: fixture.awayId, awayId: fixture.homeId })))].flatMap((fixtures, round) => fixtures.map((fixture, index) => ({ ...fixture, id: `${round + 1}-${index + 1}`, round, result: null })));
+  }
+  function seeded(seed) {
+    let state = seed >>> 0;
+    return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967295; };
+  }
+  function hash(seed, value) {
+    let result = seed >>> 0;
+    for (const char of value) result = Math.imul(result ^ char.charCodeAt(0), 16777619) >>> 0;
+    return result;
+  }
+  function poisson(mean, random) {
+    const threshold = Math.exp(-mean);
+    let product = 1, count = 0;
+    do { product *= random(); count++; } while (product > threshold);
+    return count - 1;
+  }
+  const expectedGoals = (own, opponent, home) => clamp(1.35 + .05 * (own - opponent) + (home ? .35 : 0), .2, 4.5);
+  function goalEvents(squad, goals, random, tallies) {
+    const result = [];
+    for (let index = 0; index < goals; index++) {
+      const minute = clamp(Math.ceil(90 * Math.pow(random(), .82)), 1, 90);
+      const weights = squad.map(player => {
+        const capped = player.position === 'CDM' || player.positions[0] === 'CDM';
+        if (capped && (tallies.get(player.id) || 0) >= 10) return 0;
+        return (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4);
+      });
+      let draw = random() * weights.reduce((sum, weight) => sum + weight, 0);
+      let scorer = squad.at(-1);
+      for (let index = 0; index < squad.length; index++) if (weights[index] > 0 && (draw -= weights[index]) <= 0) { scorer = squad[index]; break; }
+      if (!scorer) continue;
+      tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1);
+      result.push({ minute, playerId: scorer.id, name: scorer.name });
+    }
+    return result.sort((a, b) => a.minute - b.minute);
+  }
+  function simulateMatch(home, away, seed, tallies = new Map()) {
+    const random = seeded((seed ^ 0x2c1b3c6d) >>> 0);
+    const homeXg = expectedGoals(home.overall, away.overall, true), awayXg = expectedGoals(away.overall, home.overall, false);
+    const homeGoals = poisson(homeXg, random), awayGoals = poisson(awayXg, random);
+    return { homeGoals, awayGoals, homeXg, awayXg,
+      homeScorers: goalEvents(home.squad, homeGoals, random, tallies), awayScorers: goalEvents(away.squad, awayGoals, random, tallies) };
+  }
+  function create(game, seed = Math.floor(Math.random() * 4294967296)) {
+    const check = readiness(game);
+    if (!check.ready) return { error: check.message };
+    if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) return { error: 'Invalid league seed.' };
+    return { league: { version: 1, engineVersion: VERSION, seed, round: 0, teams: game.managers.map(manager => team(game, manager)), fixtures: schedule(game.managers.map(manager => manager.id)) } };
+  }
+  const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
+  function playRound(league) {
+    if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
+    const teams = new Map(league.teams.map(team => [team.id, team]));
+    const tallies = new Map();
+    for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1);
+    const fixtures = league.fixtures.map(fixture => fixture.round !== league.round ? fixture : {
+      ...fixture, result: simulateMatch(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies) });
+    return { league: { ...league, fixtures, round: league.round + 1 } };
+  }
+  function table(league) {
+    const rows = league.teams.map(team => ({ id: team.id, name: team.name, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0 }));
+    const byId = new Map(rows.map(row => [row.id, row]));
+    for (const fixture of league.fixtures) {
+      if (!fixture.result) continue;
+      const home = byId.get(fixture.homeId), away = byId.get(fixture.awayId), { homeGoals, awayGoals } = fixture.result;
+      home.played++; away.played++; home.gf += homeGoals; home.ga += awayGoals; away.gf += awayGoals; away.ga += homeGoals;
+      if (homeGoals > awayGoals) { home.won++; home.points += 3; away.lost++; }
+      else if (awayGoals > homeGoals) { away.won++; away.points += 3; home.lost++; }
+      else { home.drawn++; away.drawn++; home.points++; away.points++; }
+    }
+    rows.forEach(row => { row.gd = row.gf - row.ga; });
+    return rows.sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf || league.teams.findIndex(team => team.id === a.id) - league.teams.findIndex(team => team.id === b.id));
+  }
+  function awards(game) {
+    if (game.phase !== 'complete' || !game.sales.length) return null;
+    const pool = new Map(game.pool.map(entry => [entry.id, entry]));
+    const spent = game.sales.reduce((sum, sale) => sum + sale.price, 0);
+    const weight = sale => Math.pow(draft.rating(pool.get(sale.playerId), game.config.mode) / 80, 4);
+    const totalWeight = game.sales.reduce((sum, sale) => sum + weight(sale), 0);
+    const valued = game.sales.map(sale => ({ ...sale, rating: draft.rating(pool.get(sale.playerId), game.config.mode), estimated: spent * weight(sale) / totalWeight }));
+    const biggestBuy = valued.slice().sort((a, b) => b.price - a.price || b.rating - a.rating)[0];
+    const bargain = valued.slice().sort((a, b) => (b.estimated - b.price) - (a.estimated - a.price) || b.rating - a.rating)[0];
+    const biggestSpender = game.managers.map(manager => ({ id: manager.id, name: manager.name, spent: auction.STARTING_BUDGET - auction.budget(game, manager.id) })).sort((a, b) => b.spent - a.spent)[0];
+    return { biggestBuy, bargain, biggestSpender };
+  }
+  function serialise(league) {
+    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, boards: league.teams.map(team => ({ id: team.id, board: team.board })) } : null;
+  }
+  function restore(saved, game) {
+    try {
+      if (!saved || saved.version !== 1 || saved.engineVersion !== VERSION || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
+      if (JSON.stringify(saved.boards) !== JSON.stringify(game.managers.map(manager => ({ id: manager.id, board: manager.board })))) return null;
+      let league = create(game, saved.seed).league;
+      if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
+      for (let round = 0; round < saved.round; round++) league = playRound(league).league;
+      return league;
+    } catch { return null; }
+  }
+  const api = { VERSION, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
+})(globalThis);
+</script><script>(() => {
+  'use strict';
+  const $ = selector => document.querySelector(selector);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const money = price => `£${(price / 10).toFixed(price % 10 ? 1 : 0)}m`;
+  const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
+  let room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selected = null, bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let showRatings = storage.get('ratings') !== 'hide';
+  let fullStats = false;
+  const clock = () => Date.now() + offset;
+  const memberName = id => room?.members.find(member => member.managerId === id)?.name || 'Manager';
+  const entry = id => room?.game?.pool.find(player => player.id === id);
+  const rating = player => DraftCore.rating(player, room.game.config.mode);
+  const myBudget = () => room?.game ? AuctionCore.budget(room.game, room.me) : 1000;
+  const myFull = () => room?.game && AuctionCore.purchases(room.game, room.me).length >= 11;
+  const disabled = value => value ? 'disabled' : '';
+  const wheel = spinning => `<div class="mystery-wheel" role="img" aria-label="Mystery player wheel. Identities stay hidden until the spin ends."><div class="wheel-disc ${spinning ? 'spinner' : ''}"></div><span class="wheel-arrow"></span><span class="wheel-centre">?</span></div>`;
+  let toastTimer;
+  function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 4500); }
+  async function api(url, body) {
+    const started = Date.now();
+    const response = await fetch(url, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    let data;
+    try { data = await response.json(); } catch { throw new Error('Could not reach the game server. Please try again.'); }
+    if (data.serverTime) offset = data.serverTime - (started + Date.now()) / 2;
+    if (data.room) accept(data.room);
+    if (!response.ok) { const error = new Error(data.error || 'Request failed.'); error.status = response.status; throw error; }
+    return data;
+  }
+  function connection() {
+    $('#connection').textContent = room ? (connected ? '● Live' : '● Reconnecting…') : 'Online rooms';
+    $('#connection').classList.toggle('live', connected);
+  }
+  function accept(next) {
+    if (room?.id === next.id && next.revision < room.revision) return;
+    const newRound = room?.round?.id !== next.round?.id;
+    const first = room?.id !== next.id;
+    room = next; storage.set('room', room.id);
+    if (newRound) { bidText = ''; revealDrawn = null; }
+    if (first) { teamId = room.me; selected = null; tab = room.status === 'complete' ? 'league' : 'auction'; }
+    if (room.status === 'complete' && newRound) tab = 'league';
+    render();
+  }
+  function connect() {
+    clearTimeout(reconnectTimer);
+    if (!room) return;
+    if (socket) { socket.onclose = null; socket.close(); }
+    const id = room.id;
+    socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/live?roomId=${encodeURIComponent(id)}`);
+    socket.onopen = () => { if (room?.id !== id) return; connected = true; retry = 0; connection(); render(); };
+    socket.onmessage = event => { try { const message = JSON.parse(event.data); if (message.type === 'state' && room?.id === id) { offset = message.serverTime - Date.now(); accept(message.room); } } catch { toast('A live update could not be read. Reconnect to refresh.'); } };
+    socket.onclose = event => {
+      if (room?.id !== id) return;
+      connected = false; connection(); render();
+      if (event.code === 1008) { toast(event.reason || 'Room no longer available.'); return; }
+      reconnectTimer = setTimeout(async () => { try { await api(`/api/room/${id}`); connect(); } catch (error) { toast(error.message); if (error.status === 403 || error.status === 404) return; connect(); } }, Math.min(1000 * 2 ** retry++, 15000));
+    };
+  }
+  async function action(type, details = {}) {
+    if (busy || !connected) return;
+    busy = true; render();
+    try { await api('/api/action', { roomId: room.id, command: { type, requestId: crypto.randomUUID(), ...(['bid', 'withdraw', 'skip', 'reveal'].includes(type) ? { roundId: room.round?.id ?? null } : {}), ...details } }); }
+    catch (error) { toast(error.message); }
+    finally { busy = false; render(); }
+  }
+  function rules(config) { return `<div class="rules stack"><div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>Formation</span><strong>${esc(config.formation)}</strong></div><p>£100m each · 11 players each · 60 seconds from the first bid · +10 seconds per new bid. Settings lock when the room is created.</p></div>`; }
+  function home() {
+    const code = new URLSearchParams(location.search).get('code') || '';
+    return `<div class="hero"><div class="eyebrow">A room. A budget. Your best XI.</div><h1 class="gap-top">Build your team.<br>Beat your mates.</h1><p>A live football auction, straight from your phone. Draft legends, outbid your friends, then play a league together.</p></div><div class="grid home-panels"><section class="panel stack"><div class="eyebrow">You set the rules</div><h2>Host an auction</h2><p>Choose your player pool, share a four-digit code and get everyone ready.</p><button class="primary" data-do="setup">Create room →</button></section><form id="join-form" class="panel stack"><div class="eyebrow">Got an invite?</div><h2>Join your friends</h2><div class="field"><label for="join-name">Your manager name</label><input id="join-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="join-code">Room code</label><input class="code-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required value="${esc(/^\d{4}$/.test(code) ? code : '')}" placeholder="0000" autocomplete="off"></div><button class="primary" ${disabled(busy)}>Join room →</button></form><p class="wide hint">Each manager needs their own browser or device. Already playing? Use the same browser to rejoin with your saved team. <a href="/offline.html">Play the local version</a>.</p></div>`;
+  }
+  function setup() {
+    return `<div class="settings stack"><div class="row"><div><div class="eyebrow">Before kick-off</div><h1 class="gap-top">Your auction rules</h1></div><button class="quiet" data-do="home">Back</button></div><form id="create-form" class="panel stack"><div class="grid"><div class="field"><label for="host-name">Your manager name</label><input id="host-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => `<option value="${i + 2}" ${i === 1 ? 'selected' : ''}>${i + 2} managers · ${(i + 2) * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${Object.keys(DraftCore.formations).map(value => `<option>${esc(value)}</option>`).join('')}</select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak">Peak overall rating</option><option value="season">Rating in the selected season</option></select></div></div><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[0])} – ${esc(seasons.at(-1))}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="0"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${seasons.length - 1}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">40 – 95</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="40"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="95"></label></div></div><p class="hint">The server selects a hidden, balanced pool with enough players for the chosen formation, including one goalkeeper per manager. These rules stay fixed for the game.</p><button class="primary" ${disabled(busy)}>Create room & get your code →</button></form></div>`;
+  }
+  function lobby() {
+    const me = room.members.find(member => member.managerId === room.me), allReady = room.members.length === room.capacity && room.members.every(member => member.ready);
+    return `<div class="room-head row"><div><div class="eyebrow">The dressing room</div><h1 class="gap-top">Waiting for your managers</h1></div><span class="pill">${room.members.length}/${room.capacity} joined</span></div><div class="grid lobby-grid"><section class="panel stack"><h2>Share your room code</h2><div class="big-code">${room.code}</div><div class="actions"><button data-do="copy-code">Copy code</button><button data-do="share">Share invite</button></div><p class="hint">Open this game on another device and enter the code. The room lasts 24 hours.</p>${rules(room.config)}</section><section class="panel stack"><h2>Your managers</h2><div>${room.members.map(member => `<div class="member"><div class="avatar">${esc(member.name.slice(0, 1).toUpperCase())}</div><div class="grow"><strong>${esc(member.name)}${member.managerId === room.me ? ' (you)' : ''}</strong><small>${member.isHost ? 'Host · ' : ''}${member.ready ? 'Ready to draft' : 'Not ready yet'}</small></div>${room.isHost && member.managerId !== room.me ? `<button class="quiet danger" data-do="kick" data-id="${member.managerId}" aria-label="Remove ${esc(member.name)}">×</button>` : `<span class="pill ${member.ready ? 'green' : ''}">${member.ready ? 'Ready' : 'Waiting'}</span>`}</div>`).join('')}</div><button class="${me.ready ? 'quiet' : 'primary'}" data-do="ready" ${disabled(!connected || busy)}>${me.ready ? 'Not ready' : 'I’m ready'}</button>${room.isHost ? `<button class="primary" data-do="start" ${disabled(!allReady || !connected || busy)}>Start the auction →</button><p class="hint">Everyone must join and be ready before you start.</p>` : '<p class="hint">Your host starts once everyone is ready.</p>'}</section></div>${roomFooter()}`;
+  }
+  function roomFooter() { return `<details class="gap-top"><summary class="hint">Room options</summary><div class="footer-actions"><button class="quiet" data-do="leave">Return to home</button>${room.isHost ? `<select id="next-host" aria-label="Choose next host">${room.members.filter(member => member.managerId !== room.me).map(member => `<option value="${member.managerId}">${esc(member.name)}</option>`).join('')}</select><button class="quiet" data-do="transferHost" ${disabled(!connected || busy || room.members.length < 2)}>Hand over host</button>` : ''}</div><p class="hint gap-top">Leaving this page keeps your place in the room. Closing the browser does not withdraw a live bid. Hand over hosting before the host leaves.</p></details>`; }
+  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${[['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League']].map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
+  function auctionScreen() {
+    const round = room.round, player = round && entry(round.playerId), spinning = round?.status === 'open' && clock() < round.opensAt;
+    const open = round?.status === 'open', out = round?.withdrawn.includes(room.me), leader = round?.leader;
+    const allowed = open && !spinning && !out && !myFull() && connected && !busy && !(round.deadline && clock() >= round.deadline);
+    const min = leader ? leader.price + 1 : 0;
+    const ended = round && !open;
+    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span><span class="pill">${esc(player.player.positions.join(' / '))}</span>${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="decimal" type="number" min="${min / 10}" max="${myBudget() / 10}" step="0.1" placeholder="${min / 10}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>Place bid${leader?.managerId === room.me ? ' · you’re leading' : ''}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed)}>${out ? 'You’re out for this player' : myFull() ? 'Your XI is full' : 'Back out for this player'}</button><p class="hint">First bid starts 60 seconds. Every later bid adds 10 seconds. Backing out removes your bids; you cannot re-enter this player’s auction.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
+  }
+  function teamsScreen() {
+    if (!room.game.managers.some(manager => manager.id === teamId)) teamId = room.me;
+    const manager = room.game.managers.find(manager => manager.id === teamId), own = teamId === room.me, editable = own && !room.league;
+    const team = LeagueCore.team(room.game, manager), sales = AuctionCore.purchases(room.game, teamId);
+    if (!sales.some(sale => sale.playerId === selected) || !editable) selected = null;
+    const paid = id => sales.find(sale => sale.playerId === id)?.price || 0;
+    return `<div class="team-picker">${room.game.managers.map(manager => `<button data-do="team" data-id="${manager.id}" class="${teamId === manager.id ? 'selected' : ''}">${esc(manager.name)}${manager.id === room.me ? ' · You' : ''}</button>`).join('')}</div><div class="team-layout"><section class="panel stack"><div class="row"><h2>${esc(manager.name)}’s XI</h2><span class="pill">${esc(room.game.config.formation)}</span></div>${showRatings ? `<div class="stat-grid">${[['Attack', team.attack], ['Midfield', team.midfield], ['Defence', team.defence], ['GK', team.goalkeeping]].map(([label, value]) => `<div class="stat"><strong>${value || '—'}</strong>${label}</div>`).join('')}</div>` : ''}<div class="pitch"><div class="circle"></div><div class="box top-box"></div><div class="box bottom-box"></div>${DraftCore.formations[room.game.config.formation].map((slot, index) => { const player = entry(manager.board[index]); return `<button class="slot ${player && LeagueCore.fitMultiplier(slot.position, player.player.positions) === .93 ? 'misplaced' : ''} ${player?.id === selected ? 'selected' : ''}" style="left:${slot.x}%;top:${slot.y}%" data-do="slot" data-id="${index}" ${disabled(!editable || !connected || busy)} aria-label="${esc(slot.position)}: ${esc(player?.player.name || 'Empty slot')}"><span class="role">${slot.position}</span><span class="name">${player ? esc(player.player.name) : '+'}</span>${player ? `<span class="paid">${money(paid(player.id))}</span>${showRatings ? `<span class="small-rating"> · ${rating(player)}</span>` : ''}` : ''}</button>`; }).join('')}</div><p class="hint">${room.league ? 'Starting XIs are locked for the league.' : own ? selected ? `${esc(entry(selected).player.name)} selected. Tap any position to place or swap.` : 'Tap a squad player, then tap a position to place or swap them.' : 'You can view this XI. Only its manager can move players.'} Orange outlines show an unfamiliar position.</p></section><section class="panel stack"><div class="row"><h2>The squad</h2><span class="pill">${sales.length}/11 · ${money(AuctionCore.budget(room.game, teamId))} left</span></div>${editable ? `<div class="actions"><button data-do="autoPlace" ${disabled(!connected || busy || !sales.length)}>Arrange automatically</button>${selected ? `<button class="quiet" data-do="unplace" data-id="${esc(selected)}" ${disabled(!connected || busy)}>Take off pitch</button>` : ''}</div>` : ''}<div class="squad-list">${sales.map(sale => { const player = entry(sale.playerId), placed = manager.board.includes(player.id); return `<button class="squad-player ${player.id === selected ? 'selected' : ''} ${placed ? 'placed' : ''}" data-do="select-player" data-id="${esc(player.id)}" ${disabled(!editable)}><span><strong>${esc(player.player.name)}</strong><small>${esc(player.player.positions.join(' / '))} · ${esc(player.season.season)}${placed ? ' · On pitch' : ''}</small></span><span>${money(sale.price)}${showRatings ? `<small> · ${rating(player)}</small>` : ''}</span></button>`; }).join('') || '<div class="empty">Your first signing is waiting in the auction.</div>'}</div>${showRatings ? `<p class="hint">Team overall: ${team.overall || '—'}. Positions affect team strength in the league.</p>` : ''}</section></div>`;
+  }
+  function transfersScreen() { return `<section class="panel stack"><div class="row"><h2>Transfer board</h2><span class="pill">${room.game.sales.length} signings</span></div><p>Every deal, ordered from the biggest fee to the smallest.</p><div>${room.game.sales.slice().sort((a, b) => b.price - a.price).map((sale, i) => { const player = entry(sale.playerId); return `<div class="sale-row"><span class="muted">${i + 1}</span><div style="flex:1"><strong>${esc(player.player.name)} ${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</strong><small>${esc(memberName(sale.managerId))} · ${esc(player.player.positions.join(' / '))} · ${esc(player.season.season)}</small></div><span class="price">${money(sale.price)}</span><button class="quiet" data-do="team" data-id="${sale.managerId}" aria-label="View ${esc(memberName(sale.managerId))}’s team">XI</button></div>`; }).join('') || '<div class="empty">No deals yet. The auction is where it all starts.</div>'}</div></section>`; }
+  function leagueScreen() {
+    const game = room.game;
+    if (room.status !== 'complete') return `<section class="panel stack"><div class="eyebrow">After the auction</div><h2>Your league is coming</h2><p>Once all ${game.totalPlayers} players are signed, we’ll reveal the bargains and big spends. Arrange every XI, then everyone plays each other home and away.</p><button data-do="tab" data-id="auction">Back to the auction</button></section>`;
+    const awards = LeagueCore.awards(game), check = LeagueCore.readiness(game), league = room.league, count = league ? LeagueCore.roundCount(league) : 0;
+    const playerAward = (label, sale) => `<div class="award"><div class="eyebrow">${label}</div><strong>${esc(entry(sale.playerId).player.name)}</strong><p>${esc(memberName(sale.managerId))} · ${money(sale.price)}</p>${showRatings ? `<span class="pill">${sale.rating} rated</span>` : ''}</div>`;
+    const report = `<div class="grid">${playerAward('Bargain of the draft', awards.bargain)}${playerAward('Biggest signing', awards.biggestBuy)}<div class="award wide"><div class="eyebrow">Biggest spender</div><strong>${esc(awards.biggestSpender.name)}</strong><p>${money(awards.biggestSpender.spent)} spent on their XI</p><p class="hint gap-top">Bargains compare each fee with a share of the total spend weighted by player rating.</p></div></div>`;
+    if (!league) return `<div class="stack">${report}<section class="panel stack"><h2>Meet the teams</h2>${game.managers.map(manager => { const team = LeagueCore.team(game, manager); return `<div class="sale-row"><div><strong>${esc(manager.name)}</strong><small>${team.placed}/11 placed · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} overall` : ''}</small></div><button data-do="team" data-id="${manager.id}">View XI</button></div>`; }).join('')}<p>${esc(check.message)}</p>${room.isHost ? `<button class="primary" data-do="startLeague" ${disabled(!check.ready || !connected || busy)}>Start the home & away league →</button>` : '<p class="hint">The host will start once everyone has placed their XI.</p>'}</section></div>`;
+    const finished = league.round >= count, rows = LeagueCore.table(league);
+    const scorers = new Map(); for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) { const value = scorers.get(scorer.playerId) || { name: scorer.name, goals: 0 }; value.goals++; scorers.set(scorer.playerId, value); }
+    return `<div class="stack"><section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${league.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div><div class="scroll-table"><table><thead><tr><th>#</th><th>Manager</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>${rows.map((row, i) => `<tr><td>${i + 1}</td><td>${esc(row.name)}</td>${['played', 'won', 'drawn', 'lost', 'gf', 'ga', 'gd'].map(key => `<td>${row[key]}</td>`).join('')}<td class="points">${row.points}</td></tr>`).join('')}</tbody></table></div>${room.isHost && !finished ? `<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy)}>Play matchday ${league.round + 1} →</button><button class="quiet" data-do="finishLeague" ${disabled(!connected || busy)}>Simulate remaining season</button></div>` : !finished ? '<p class="hint">Your host plays the next matchday. Results update live for everyone.</p>' : ''}</section><section class="panel stack"><h2>Fixtures & results</h2>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, league.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${round >= league.round ? ' · Upcoming' : ''}</summary>${league.fixtures.filter(fixture => fixture.round === round).map(fixture => { const result = fixture.result; return `<div class="fixture"><div class="row"><span class="team-name">${esc(memberName(fixture.homeId))}</span><span class="score">${result ? `${result.homeGoals} – ${result.awayGoals}` : 'vs'}</span><span class="team-name">${esc(memberName(fixture.awayId))}</span></div>${result ? `<small>${result.homeScorers.map(scorer => `${esc(scorer.name)} ${scorer.minute}′`).join(', ') || '—'}<br>${result.awayScorers.map(scorer => `${esc(scorer.name)} ${scorer.minute}′`).join(', ') || '—'}</small>` : ''}</div>`; }).join('')}</details>`).join('')}</section>${scorers.size ? `<section class="panel stack"><h2>Golden boot</h2>${[...scorers.values()].sort((a, b) => b.goals - a.goals).slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goals</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
+  }
+  function render() {
+    const focus = document.activeElement, focusId = focus?.id, value = focus && ['INPUT', 'SELECT'].includes(focus.tagName) ? focus.value : null;
+    const caret = focus?.tagName === 'INPUT' && ['text', 'search'].includes(focus.type) ? [focus.selectionStart, focus.selectionEnd] : null;
+    $('#rating-toggle').hidden = !room?.game; $('#rating-toggle').textContent = showRatings ? 'Hide ratings' : 'Show ratings';
+    connection();
+    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen }[tab] || auctionScreen)();
+    if (room?.league && tab === 'league') {
+      $('.scroll-table').classList.toggle('full-table', fullStats);
+      $('.scroll-table').insertAdjacentHTML('afterend', `<button class="quiet mobile-stats" data-do="table-stats">${fullStats ? 'Show compact table' : 'Show full stats'}</button>`);
+    }
+    if (focusId) { const next = document.getElementById(focusId); if (next && !next.disabled) { if (value !== null) next.value = value; next.focus({ preventScroll: true }); if (caret) next.setSelectionRange(...caret); } }
+    updateTimer();
+  }
+  function updateTimer() {
+    const round = room?.round;
+    if (round?.status === 'open' && clock() >= round.opensAt && revealDrawn !== round.id) { revealDrawn = round.id; if (tab === 'auction') render(); return; }
+    const timer = $('#timer'); if (!timer || !round) return;
+    const seconds = round.deadline ? Math.max(0, Math.ceil((round.deadline - clock()) / 1000)) : null;
+    timer.textContent = round.status !== 'open' ? 'Ended' : clock() < round.opensAt ? 'Revealing' : seconds === null ? 'Waiting' : seconds === 0 ? 'Settling…' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    timer.classList.toggle('urgent', seconds !== null && seconds <= 10 && round.status === 'open');
+    if (seconds === 0) $('#bid-form')?.querySelectorAll('button,input').forEach(element => { element.disabled = true; });
+  }
+  $('#rating-toggle').addEventListener('click', () => { showRatings = !showRatings; storage.set('ratings', showRatings ? 'show' : 'hide'); render(); });
+  $('#app').addEventListener('input', event => {
+    if (event.target.id === 'bid-value') bidText = event.target.value;
+    if (['season-from', 'season-to', 'rating-min', 'rating-max'].includes(event.target.id)) {
+      const seasonInput = event.target.id.startsWith('season'), low = $(seasonInput ? '#season-from' : '#rating-min'), high = $(seasonInput ? '#season-to' : '#rating-max');
+      if (+low.value > +high.value) (event.target === low ? high : low).value = event.target.value;
+      $(seasonInput ? '#season-label' : '#rating-label').textContent = seasonInput ? `${seasons[+low.value]} – ${seasons[+high.value]}` : `${low.value} – ${high.value}`;
+    }
+  });
+  $('#app').addEventListener('submit', async event => {
+    event.preventDefault(); const form = event.target;
+    if (form.id === 'bid-form') {
+      const value = $('#bid-value').value, price = Math.round(Number(value) * 10);
+      if (value === '' || !Number.isFinite(Number(value)) || Math.abs(Number(value) * 10 - price) > .00001) return toast('Enter a bid in £0.1m increments.');
+      return action('bid', { price });
+    }
+    if (busy) return;
+    const data = new FormData(form), displayName = String(data.get('name') || '').trim(); storage.set('name', displayName);
+    let body;
+    if (form.id === 'join-form') body = { name: displayName, code: String(data.get('code') || '') };
+    else if (form.id === 'create-form') body = { name: displayName, capacity: +data.get('capacity'), config: { formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax') } };
+    else return;
+    busy = true; form.querySelector('button[type=submit],button:not([type])').disabled = true;
+    try { await api(form.id === 'join-form' ? '/api/join' : '/api/create', body); connect(); }
+    catch (error) { toast(error.message); }
+    finally { busy = false; if (room) render(); else form.querySelector('button[type=submit],button:not([type])').disabled = false; }
+  });
+  $('#app').addEventListener('click', async event => {
+    const button = event.target.closest('[data-do]'); if (!button || button.disabled) return;
+    const type = button.dataset.do, id = button.dataset.id;
+    if (type === 'setup' || type === 'home') { screen = type; render(); return; }
+    if (type === 'tab') { tab = id; render(); window.scrollTo({ top: 0 }); return; }
+    if (type === 'table-stats') { fullStats = !fullStats; render(); return; }
+    if (type === 'team') { teamId = id; tab = 'teams'; selected = null; render(); window.scrollTo({ top: 0 }); return; }
+    if (type === 'select-player') { selected = selected === id ? null : id; render(); return; }
+    if (type === 'slot') { if (selected) return action('place', { playerId: selected, slot: +id }); const manager = room.game.managers.find(manager => manager.id === teamId); selected = manager.board[+id]; render(); return; }
+    if (type === 'unplace') return action(type, { playerId: id });
+    if (type === 'increment') { const floor = room.round.leader ? room.round.leader.price : 0, value = bidText === '' ? floor : Math.round(Number(bidText) * 10); bidText = ((Math.max(floor, value) + +id * 10) / 10).toFixed(1); $('#bid-value').value = bidText; return; }
+    if (type === 'copy-code' || type === 'share') {
+      const url = `${location.origin}/?code=${room.code}`;
+      try { if (type === 'share' && navigator.share) await navigator.share({ title: 'Join my Touchline auction', text: `Room ${room.code}`, url }); else { await navigator.clipboard.writeText(type === 'share' ? url : room.code); toast(type === 'share' ? 'Invite link copied' : 'Room code copied'); } } catch (error) { if (error.name !== 'AbortError') toast(`Room ${room.code} · ${url}`); }
+      return;
+    }
+    if (type === 'leave') { clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); } socket = null; room = null; connected = false; storage.set('room', null); screen = 'home'; render(); return; }
+    if (type === 'ready') return action(type, { ready: !room.members.find(member => member.managerId === room.me).ready });
+    if (type === 'kick') return action(type, { managerId: id });
+    if (type === 'transferHost') return action(type, { managerId: $('#next-host').value });
+    return action(type);
+  });
+  async function init() {
+    try {
+      const results = await Promise.all([api('/api/session', {}), api('/api/options')]); seasons = results[1].seasons;
+      const id = storage.get('room');
+      if (id) { try { await api(`/api/room/${id}`); connect(); } catch (error) { if ([403, 404].includes(error.status)) storage.set('room', null); toast(error.message); } }
+      render();
+    } catch (error) { $('#app').innerHTML = `<div class="panel stack error-panel"><h2>Couldn’t reach the game server</h2><p>${esc(error.message)}</p><p>Online play needs the Node server. Locally, run <strong>npm start</strong> and open <a href="http://localhost:4174">localhost:4174</a>.</p><button onclick="location.reload()">Try again</button></div>`; }
+  }
+  setInterval(updateTimer, 200);
+  setInterval(() => { if (room && connected) api('/api/clock').catch(() => {}); }, 30000);
+  window.addEventListener('online', () => { if (room && !connected) connect(); });
+  init();
+})();
+</script></body></html>

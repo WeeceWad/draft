@@ -1,0 +1,23 @@
+[
+  {
+    "playerId": "3395",
+    "name": "Shaun Wright-Phillips",
+    "clubId": "manchester-city",
+    "season": "1999/00",
+    "reason": "Present in player data but absent from the club wheel season list"
+  },
+  {
+    "playerId": "50660",
+    "name": "Richard Wright",
+    "clubId": "ipswich",
+    "season": "1999/00",
+    "reason": "Present in player data but absent from the club wheel season list"
+  },
+  {
+    "playerId": "egil-stenstad",
+    "name": "Egil Østenstad",
+    "clubId": "manchester-city",
+    "season": "1999/00",
+    "reason": "Present in player data but absent from the club wheel season list"
+  }
+]

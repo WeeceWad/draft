@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101218"><title>Touchline — Auction Night</title><style>/*__STYLES__*/</style></head>
+<body>
+  <header class="topbar"><a class="brand" href="#"><span class="brand-icon">T</span>TOUCHLINE<span class="brand-sub">AUCTION NIGHT</span></a><span class="header-tag"><span class="live-dot"></span> Pass & play</span></header>
+  <main>
+    <section id="setup-screen" aria-labelledby="setup-title">
+      <div class="setup-intro"><p class="eyebrow">YOUR MATES. YOUR MONEY. YOUR XI.</p><h1 id="setup-title">A big night.<br>A better <em>eleven.</em></h1><p>Spin for a player. Battle it out. Build your team.</p></div>
+      <div class="setup-card">
+        <div class="section-heading"><div><p class="eyebrow">BEFORE KICK-OFF</p><h2>Set the rules</h2></div><span class="badge">£100m each</span></div>
+        <div class="setup-grid"><label>How many managers?<select id="manager-count" aria-label="Number of managers"></select></label><label>Formation<select id="setup-formation"></select></label></div>
+        <div id="manager-names" class="manager-names"></div>
+        <div class="setting-row"><span class="setting-label">Player ratings</span><div class="segmented" role="group" aria-label="Starting rating mode"><button type="button" data-setup-mode="peak" aria-pressed="true">Overall</button><button type="button" data-setup-mode="season" aria-pressed="false">Season</button></div></div>
+        <fieldset class="range-control" data-range="setup-season"><legend>Season range</legend><div class="range-values"><output id="setup-season-from"></output><span>to</span><output id="setup-season-to"></output></div><div class="range-track"><input id="setup-season-min" type="range" step="1" aria-label="First season"><input id="setup-season-max" type="range" step="1" aria-label="Last season"></div><div class="range-extents"><span>1992/93</span><span>2026/27</span></div></fieldset>
+        <fieldset class="range-control" data-range="setup-rating"><legend id="setup-rating-label">Overall rating range</legend><div class="range-values"><output id="setup-rating-from"></output><span>to</span><output id="setup-rating-to"></output></div><div class="range-track"><input id="setup-rating-min" type="range" min="40" max="95" step="1" aria-label="Minimum player rating"><input id="setup-rating-max" type="range" min="40" max="95" step="1" aria-label="Maximum player rating"></div><div class="range-extents"><span>40 · Every ability</span><span>95 · The very best</span></div></fieldset>
+        <label class="switch-label"><span><strong>Show player ratings</strong><small>You can toggle visibility during the game.</small></span><input id="setup-show-ratings" type="checkbox" checked role="switch"></label>
+        <div class="pool-summary"><span class="live-dot"></span><div><strong id="setup-pool"></strong><p id="setup-coverage"></p></div></div>
+        <p id="setup-error" class="error-message" role="status" aria-live="polite"></p>
+        <div class="setup-actions"><button id="resume" class="secondary-button" hidden>Resume auction</button><button id="start" class="primary-button">Start auction <span aria-hidden="true">→</span></button></div>
+        <p id="setup-saved-note" class="muted-note" hidden>Starting a new auction replaces your saved game. Resume keeps its teams, budgets and rules.</p>
+        <p class="setup-explainer">Bid out loud together, then record the buyer and price on this device. Each manager gets 11 players and a £100m budget. The pool is random, with enough players for every position.</p>
+      </div>
+    </section>
+    <section id="game-screen" hidden>
+      <div class="game-heading"><div><p class="eyebrow">THE AUCTION ROOM</p><h1>Auction night<span>.</span></h1></div><button id="open-settings" class="secondary-button small">New game ↗</button></div>
+      <div class="game-rules"><span id="active-settings"></span><label class="rating-toggle"><input id="ratings-toggle" type="checkbox" checked>Show ratings</label></div>
+      <div id="manager-strip" class="manager-strip" aria-label="Managers and budgets"></div>
+      <nav class="view-tabs" aria-label="Game sections"><button data-view="auction" aria-pressed="true">◉ <span>Auction</span></button><button data-view="teams" aria-pressed="false">▦ <span>Teams</span></button><button data-view="transfers" aria-pressed="false">↗ <span>Transfers</span><span id="transfer-count" class="tab-count">0</span></button><button data-view="league" aria-pressed="false">♜ <span>League</span></button></nav>
+      <div id="game-content" class="game-content" data-view="auction">
+        <section id="auction-panel" class="panel auction-panel" aria-labelledby="auction-title">
+          <div class="section-heading"><div><p class="eyebrow">ONE PLAYER. ONE WINNING BID.</p><h2 id="auction-title">Who’s up next?</h2></div><span id="auction-progress" class="badge">0 / 33 sold</span></div>
+          <div id="wheel-area" class="wheel-area"><span class="wheel-pointer" aria-hidden="true"></span><div class="wheel-wrap"><canvas id="wheel" width="640" height="640" role="img" aria-label="Mystery player wheel. Player identities stay hidden until revealed."></canvas><div class="wheel-hub"><span class="mystery-mark" aria-hidden="true">?</span><small id="wheel-caption">SPIN TO REVEAL</small></div></div></div>
+          <div id="player-card" class="reveal-card" hidden><p id="reveal-kicker" class="eyebrow">UP FOR AUCTION</p><div class="reveal-shirt"><span id="reveal-rating"></span></div><h3 id="reveal-name"></h3><div id="reveal-positions" class="position-badges"></div><p id="reveal-meta"></p><div id="sale-result" class="sale-result" hidden></div></div>
+          <div id="spin-actions"><button id="spin" class="primary-button spin-button">Spin for a player <span aria-hidden="true">↻</span></button><p class="muted-note">Every player stays a mystery until the wheel stops.</p></div>
+          <form id="bid-form" hidden novalidate><div class="bid-title"><h3>Record the winning bid</h3><span>Bid out loud with your mates</span></div><div id="winner-options" class="winner-options" aria-label="Choose the buyer"></div><div class="price-row"><label for="bid-price">Price paid</label><div class="price-input"><span>£</span><input id="bid-price" type="number" inputmode="decimal" min="0" max="100" step="0.1" value="1" aria-label="Winning bid in millions"><span>m</span></div></div><div class="price-presets"><button type="button" data-price="1">£1m</button><button type="button" data-price="5">£5m</button><button type="button" data-price="10">£10m</button><button type="button" data-price="20">£20m</button></div><p id="bid-error" class="error-message" role="status" aria-live="polite"></p><button id="sell" type="submit" class="primary-button" disabled>Confirm sale <span aria-hidden="true">→</span></button><button id="pass" type="button" class="text-button pass-button">No bids? Return player to the wheel</button></form>
+          <div id="sold-actions" class="sold-actions" hidden><button id="next-player" class="primary-button">Next player <span aria-hidden="true">↻</span></button><button id="view-buyer" class="secondary-button">Place on team pitch →</button><button id="undo" class="text-button">Undo this sale</button></div>
+          <div id="completion" class="completion" hidden><h3>That’s the auction!</h3><p>Arrange your XIs, reveal the bargains and big spends, then settle it on the pitch.</p><button id="review-teams" class="primary-button">Arrange the teams →</button><button id="review-auction" class="secondary-button">Awards & league →</button><button id="undo-final" class="text-button">Undo last sale</button></div>
+        </section>
+        <section id="team-panel" class="panel team-panel" aria-labelledby="team-title"><div class="section-heading"><div><p class="eyebrow">YOUR MONEY. YOUR PLAYERS.</p><h2 id="team-title"></h2></div><span id="team-formation" class="badge"></span></div><div id="team-tabs" class="team-tabs" aria-label="Select a manager’s team"></div><div class="team-stats"><div><strong id="team-players"></strong><small>PLAYERS BOUGHT</small></div><div><strong id="team-budget"></strong><small>REMAINING</small></div><div><strong id="team-average"></strong><small>AVG. RATING</small></div></div><p id="placement-help" class="placement-help" role="status" aria-live="polite">Tap a player below, then a spot on the pitch.</p><div id="pitch" class="pitch"><svg class="pitch-lines" viewBox="0 0 600 700" preserveAspectRatio="none" aria-hidden="true"><rect x="20" y="18" width="560" height="664" rx="2"/><path d="M20 350H580"/><circle cx="300" cy="350" r="72"/><circle class="spot" cx="300" cy="350" r="3"/><path d="M170 18V128H430V18M238 18V65H362V18M170 682V572H430V682M238 682V635H362V682"/><path d="M240 128Q300 178 360 128M240 572Q300 522 360 572"/><circle class="spot" cx="300" cy="100" r="3"/><circle class="spot" cx="300" cy="600" r="3"/></svg><div id="pitch-slots"></div><span class="pitch-watermark">TOUCHLINE</span></div><div class="roster-heading"><h3>Your players</h3><button id="deselect-player" class="text-button" hidden>Deselect</button></div><div id="owned-players" class="owned-players"></div></section>
+        <section id="transfers-panel" class="panel transfers-panel" aria-labelledby="transfers-title"><div class="section-heading"><div><p class="eyebrow">THE DEAL SHEET</p><h2 id="transfers-title">Biggest buys</h2></div><span id="ledger-progress" class="badge"></span></div><p class="ledger-note">Every sale, from most to least expensive.</p><div id="transfers-list" class="transfers-list"></div></section>
+        <section id="league-panel" class="panel league-panel" aria-labelledby="league-title">
+          <div class="section-heading"><div><p class="eyebrow">SETTLE IT ON THE PITCH</p><h2 id="league-title">Your mini-league</h2></div><span id="league-progress" class="badge">After the auction</span></div>
+          <div id="league-waiting" class="empty-state">Finish the auction to reveal the awards, compare your teams and start the league.</div>
+          <div id="post-auction" hidden>
+            <div id="champion" class="champion" hidden></div>
+            <h3 class="post-title">Bargains & big spends</h3><div id="award-grid" class="award-grid"></div>
+            <p class="league-note">Bargain value compares a player’s rating with the prices paid in this auction.</p>
+            <div class="post-heading"><h3>Meet the teams</h3><span id="comparison-note"></span></div><div id="comparison-grid" class="comparison-grid"></div>
+            <div id="league-setup" class="league-start-card"><h3>Now let the football decide.</h3><p id="league-format"></p><p id="league-readiness" role="status"></p><button id="start-league" class="primary-button">Start the league →</button><button id="finish-teams" class="text-button">Arrange the remaining XIs →</button></div>
+            <div id="league-season" hidden>
+              <div class="post-heading"><h3>League table</h3><span>3 points · win / 1 · draw</span></div>
+              <label class="mobile-table-toggle"><input id="full-table" type="checkbox">Show all stats</label>
+              <div id="league-table" class="league-table-wrap" tabindex="0" role="region" aria-label="League table, scroll sideways for all statistics"></div>
+              <p class="league-note">Sorted by points, goal difference, then goals scored. Teams equal on all three share their final position.</p>
+              <div id="league-controls" class="league-controls"><button id="play-round" class="primary-button">Play matchday 1 →</button><button id="finish-league" class="secondary-button">Play remaining matches</button></div>
+              <div id="latest-matchday" class="latest-matchday"></div>
+              <details class="fixture-history"><summary>All fixtures & results</summary><div id="fixture-list"></div></details>
+            </div>
+            <details class="simulation-help"><summary>What decides a match?</summary><p>Your chosen overall or season ratings build a team score from attack, midfield, defence and goalkeeping. Natural positions give players their best contribution. Home teams get a small advantage, and stronger teams have better chances, but upsets and draws still happen.</p><p>Prices paid do not affect match strength. Hiding ratings does not change the simulation. Every team plays each opponent once at home and once away. With an odd number of teams, one team rests each matchday.</p></details>
+          </div>
+        </section>
+      </div>
+      <p id="game-status" class="game-status" role="status" aria-live="polite"></p>
+    </section>
+    <footer class="page-footer"><span>Every era. One eleven.</span><span>Offline · Saved on this device</span></footer>
+  </main>
+  <script>/*__DATA__*/</script><script>/*__CORE__*/</script><script>/*__AUCTION__*/</script><script>/*__LEAGUE__*/</script><script>/*__APP__*/</script>
+</body></html>

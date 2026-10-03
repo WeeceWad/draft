@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+public/
+*.log
+*.zip
+.test-data/
+preview-*.png
+data/research/38-0/
+data/source/
+38-0-home.html
