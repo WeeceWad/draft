@@ -14,7 +14,7 @@ function name(value) {
 function settings(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) fail('Choose between 2 and 8 managers.');
   const config = { managerCount: capacity, names: Array.from({ length: capacity }, (_, i) => `Manager ${i + 1}`), formation: input.formation,
-    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax };
+    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true };
   if (!draft.formations[config.formation] || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
     || config.seasonFrom > config.seasonTo || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax)
     || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax) fail('Choose valid formation, seasons and ratings.');
@@ -98,6 +98,19 @@ function resolve(room, now, force = false) {
   room.round.finishedAt = now;
   return true;
 }
+// Dev mode: skip the auction. Every manager gets a full XI, each player in the spot the balanced pool drew them for.
+function autoDraft(room) {
+  const slots = draft.formations[room.game.config.formation], used = new Set();
+  let game = room.game;
+  for (const manager of game.managers) slots.forEach((slot, index) => {
+    const entry = game.pool.find(entry => !used.has(entry.id) && entry.allocatedPosition === slot.position);
+    used.add(entry.id);
+    const price = Math.max(1, draft.rating(entry, game.config.mode) - 60);
+    game = auction.buy({ ...game, phase: 'revealed', currentId: entry.id }, manager.id, price).game;
+    game = auction.place(game, manager.id, entry.id, index).game;
+  });
+  room.game = { ...game, currentId: game.sales.at(-1).playerId, phase: 'complete' }; room.status = 'complete';
+}
 function apply(room, uid, command, now) {
   if (room.expiresAt <= now) fail('This room has expired. Create a new room.', 404);
   const system = uid === null && command.type === 'tick';
@@ -128,7 +141,9 @@ function apply(room, uid, command, now) {
       const config = { ...room.config, names: room.members.map(member => member.name) };
       const pool = auction.makePool(players, config, leagueCore.seeded(room.seed));
       if (pool.error) fail(pool.error);
-      room.game = auction.createGame(config, pool.pool); room.status = 'draft'; break;
+      room.game = auction.createGame(config, pool.pool); room.status = 'draft';
+      if (config.devMode) autoDraft(room);
+      break;
     }
     case 'reveal': {
       host(room, uid);

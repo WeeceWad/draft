@@ -22,7 +22,25 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   assert(open.members.every(member => !member.ready)); assert.equal(engine.view(open, 'b').capacity, 4);
   assert.throws(() => command(open, 'a', 'start'), /Wait for every manager/);
 }
+// Dev mode skips the auction: full XIs, everyone in a position they play, ready for the league.
+{
+  let dev = lobby();
+  dev = command(dev, 'a', 'settings', { capacity: 3, config: { ...config, formation: '3-5-2', devMode: true } });
+  dev.members.forEach(member => { dev = command(dev, member.uid, 'ready', { ready: true }); });
+  dev = command(dev, 'a', 'start');
+  assert.equal(dev.status, 'complete'); assert.equal(dev.game.sales.length, 33); assert.equal(dev.round, null);
+  const draft = require('../src/draft-core.js');
+  for (const manager of dev.game.managers) {
+    assert.equal(manager.board.filter(Boolean).length, 11);
+    manager.board.forEach((id, index) => assert(draft.fits(dev.game.pool.find(entry => entry.id === id).player, draft.formations['3-5-2'][index].position), 'Every player is in a position they play'));
+    assert(auction.budget(dev.game, manager.id) >= 0);
+  }
+  assert(league.readiness(dev.game).ready);
+  dev = command(dev, 'a', 'startLeague'); assert(dev.league);
+  assert.equal(engine.unpack(engine.pack(dev)).status, 'complete');
+}
 let room = command(lobby(), 'a', 'start');
+assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
 assert.throws(() => command(room, 'a', 'settings', { capacity: 3, config }), /locked/);
 assert.equal(room.game.pool.length, 33);
 assert.equal(room.game.pool.filter(entry => entry.player.positions.includes('GK')).length, 3);

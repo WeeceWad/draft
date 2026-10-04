@@ -83,3 +83,17 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .rules-form{border-top:1px solid var(--line);padding-top:16px}
 .rules-form .grid{grid-template-columns:1fr}
 .rules-form h3{margin:0}
+.stack{align-content:start}
+.lobby-grid{align-items:start}
+.lobby-rules .rules-form{border-top:0;padding-top:0}
+.lobby-rules h2{margin:0}
+.rules-form .grid{grid-template-columns:repeat(3,1fr)}
+.slider-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.check{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px dashed var(--line);border-radius:12px;font-size:13px;color:var(--muted);cursor:pointer}
+.check input{width:20px;height:20px;margin:1px 0 0;accent-color:var(--green);flex:none}
+.check strong{color:var(--text)}
+.rules-form .actions>*{flex:0 1 220px}
+@media(max-width:799px){.rules-form .grid,.slider-grid{grid-template-columns:1fr;gap:14px}.rules-form .actions>*{flex:1}}
+.lobby-rules{margin-top:20px}
+.check input[type=checkbox]{min-height:0;width:20px;height:20px;padding:0}
+@media(max-width:799px){.lobby-rules{margin-top:14px}}
