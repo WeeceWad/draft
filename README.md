@@ -6,9 +6,9 @@ Open **index.html** in a browser. The whole game, player data, styles and script
 
 ## Play together
 
-1. Choose **2–8 managers**, enter their names, and choose a formation, rating mode, season range and rating range. Everyone starts with **£100m**.
+1. Choose **2–8 managers**, enter their names, and choose a formation, rating mode, season range and rating range. Everyone starts with **£1bn**.
 2. Press **Start auction**. The game randomly chooses **11 unique footballers per manager** from your eligible pool. Three managers means 33 players, including exactly three goalkeepers.
-3. **Spin for a player**. The mystery wheel hides every player until the spin finishes. Bid out loud with your group, choose the winning manager, enter the price in millions, then confirm the sale. The budget updates immediately.
+3. **Spin for a player**. The mystery wheel hides every player until the spin finishes. Bid out loud with your group, choose the winning manager, enter the price in whole millions, then confirm the sale. The budget updates immediately.
 4. Open **Teams** or **Place on team pitch**. Tap one of your bought players, then any pitch position. Tap a placed player to move or swap them. Desktop drag-and-drop also works. Prices appear on the pitch and in your player list.
 5. Return to **Auction** and reveal the next player. Once every player is sold, review all the teams and the **Transfers** list, ordered from highest to lowest price with each buyer shown.
 6. Open **League** for **Bargains & big spends** and a comparison of everyone's XI. Use **Auto-place XI** in Teams if you want a starting arrangement, then adjust it freely.
@@ -19,7 +19,7 @@ The standalone `index.html` is a shared-device game for an in-person group. Its 
 ## Game rules
 
 - Each manager can buy at most 11 players. Nobody can spend more than their remaining budget.
-- Prices use £0.1m increments; £0 is allowed for a free transfer. Money is stored as integers to avoid rounding errors.
+- Prices are whole millions; £0 is allowed for a free transfer. Money is stored as integer millions to avoid rounding errors.
 - **Pass** queues an unsold player at the end of the cycle. Every new player appears before skipped players return, in skip order. The Auction screen shows the skipped-player list. Passing a returning player again moves them to the end of that list.
 - **Undo this sale** refunds the latest purchase and reopens that player's bidding. It is available until you spin again, including after the final sale.
 - All players are unique by player ID, even in season mode. In season mode the game chooses one eligible club-season per selected player.
@@ -32,6 +32,7 @@ The standalone `index.html` is a shared-device game for an in-person group. Its 
 - Starting the league locks the XIs and final sale so the saved results remain consistent. All matchdays save automatically; resuming preserves every score.
 - League points are 3 for a win and 1 for a draw, sorted by points, goal difference and goals scored. Teams fully tied share a rank and, if tied at the top, the championship.
 - Simulation follows the researched 38-0 head-to-head browser model, using position-adjusted overall/season ratings, home advantage and random goals. The detailed evidence, formulas, adaptations and limits are in [`docs/simulation-research.md`](docs/simulation-research.md).
+- Sound effects play for the spinning wheel and each sale. The **Sound** switch turns them off on this device.
 - Choose from 20 formations, including narrow and wide diamonds, attacking and flat 4-3-3, back-three and back-five systems. Pitch positions follow each shape: CDMs sit deeper, CAMs sit nearer the forwards, and wing-backs sit ahead of the centre-backs.
 
 ## Save and resume

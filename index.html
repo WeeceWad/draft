@@ -138,6 +138,7 @@
 }
 /* Unsold players wait until the new-player cycle ends. */
 .skipped-players{border-top:1px solid var(--border);margin-top:24px;padding-top:22px}.skipped-players h3{margin:0}.skipped-players .section-heading{margin-bottom:10px}
+.game-rules{flex-wrap:wrap}
 </style></head>
 <body>
   <header class="topbar"><a class="brand" href="#"><span class="brand-icon">T</span>TOUCHLINE<span class="brand-sub">AUCTION NIGHT</span></a><span class="header-tag"><span class="live-dot"></span> Pass & play</span></header>
@@ -145,7 +146,7 @@
     <section id="setup-screen" aria-labelledby="setup-title">
       <div class="setup-intro"><p class="eyebrow">YOUR MATES. YOUR MONEY. YOUR XI.</p><h1 id="setup-title">A big night.<br>A better <em>eleven.</em></h1><p>Spin for a player. Battle it out. Build your team.</p></div>
       <div class="setup-card">
-        <div class="section-heading"><div><p class="eyebrow">BEFORE KICK-OFF</p><h2>Set the rules</h2></div><span class="badge">£100m each</span></div>
+        <div class="section-heading"><div><p class="eyebrow">BEFORE KICK-OFF</p><h2>Set the rules</h2></div><span class="badge">£1bn each</span></div>
         <div class="setup-grid"><label>How many managers?<select id="manager-count" aria-label="Number of managers"></select></label><label>Formation<select id="setup-formation"></select></label></div>
         <div id="manager-names" class="manager-names"></div>
         <div class="setting-row"><span class="setting-label">Player ratings</span><div class="segmented" role="group" aria-label="Starting rating mode"><button type="button" data-setup-mode="peak" aria-pressed="true">Overall</button><button type="button" data-setup-mode="season" aria-pressed="false">Season</button></div></div>
@@ -156,12 +157,12 @@
         <p id="setup-error" class="error-message" role="status" aria-live="polite"></p>
         <div class="setup-actions"><button id="resume" class="secondary-button" hidden>Resume auction</button><button id="start" class="primary-button">Start auction <span aria-hidden="true">→</span></button></div>
         <p id="setup-saved-note" class="muted-note" hidden>Starting a new auction replaces your saved game. Resume keeps its teams, budgets and rules.</p>
-        <p class="setup-explainer">Bid out loud together, then record the buyer and price on this device. Each manager gets 11 players and a £100m budget. The pool is random, with enough players for every position.</p>
+        <p class="setup-explainer">Bid out loud together, then record the buyer and price on this device. Each manager gets 11 players and a £1bn budget. The pool is random, with enough players for every position.</p>
       </div>
     </section>
     <section id="game-screen" hidden>
       <div class="game-heading"><div><p class="eyebrow">THE AUCTION ROOM</p><h1>Auction night<span>.</span></h1></div><button id="open-settings" class="secondary-button small">New game ↗</button></div>
-      <div class="game-rules"><span id="active-settings"></span><label class="rating-toggle"><input id="ratings-toggle" type="checkbox" checked>Show ratings</label></div>
+      <div class="game-rules"><span id="active-settings"></span><label class="rating-toggle"><input id="ratings-toggle" type="checkbox" checked>Show ratings</label><label class="rating-toggle"><input id="sound-toggle" type="checkbox" checked>Sound</label></div>
       <div id="manager-strip" class="manager-strip" aria-label="Managers and budgets"></div>
       <nav class="view-tabs" aria-label="Game sections"><button data-view="auction" aria-pressed="true">◉ <span>Auction</span></button><button data-view="teams" aria-pressed="false">▦ <span>Teams</span></button><button data-view="transfers" aria-pressed="false">↗ <span>Transfers</span><span id="transfer-count" class="tab-count">0</span></button><button data-view="league" aria-pressed="false">♜ <span>League</span></button></nav>
       <div id="game-content" class="game-content" data-view="auction">
@@ -170,7 +171,7 @@
           <div id="wheel-area" class="wheel-area"><span class="wheel-pointer" aria-hidden="true"></span><div class="wheel-wrap"><canvas id="wheel" width="640" height="640" role="img" aria-label="Mystery player wheel. Player identities stay hidden until revealed."></canvas><div class="wheel-hub"><span class="mystery-mark" aria-hidden="true">?</span><small id="wheel-caption">SPIN TO REVEAL</small></div></div></div>
           <div id="player-card" class="reveal-card" hidden><p id="reveal-kicker" class="eyebrow">UP FOR AUCTION</p><div class="reveal-shirt"><span id="reveal-rating"></span></div><h3 id="reveal-name"></h3><div id="reveal-positions" class="position-badges"></div><p id="reveal-meta"></p><div id="sale-result" class="sale-result" hidden></div></div>
           <div id="spin-actions"><button id="spin" class="primary-button spin-button">Spin for a player <span aria-hidden="true">↻</span></button><p class="muted-note">Every player stays a mystery until the wheel stops.</p></div>
-          <form id="bid-form" hidden novalidate><div class="bid-title"><h3>Record the winning bid</h3><span>Bid out loud with your mates</span></div><div id="winner-options" class="winner-options" aria-label="Choose the buyer"></div><div class="price-row"><label for="bid-price">Price paid</label><div class="price-input"><span>£</span><input id="bid-price" type="number" inputmode="decimal" min="0" max="100" step="0.1" value="1" aria-label="Winning bid in millions"><span>m</span></div></div><div class="price-presets"><button type="button" data-price="1">£1m</button><button type="button" data-price="5">£5m</button><button type="button" data-price="10">£10m</button><button type="button" data-price="20">£20m</button></div><p id="bid-error" class="error-message" role="status" aria-live="polite"></p><button id="sell" type="submit" class="primary-button" disabled>Confirm sale <span aria-hidden="true">→</span></button><button id="pass" type="button" class="text-button pass-button">No bids? Return player to the wheel</button></form>
+          <form id="bid-form" hidden novalidate><div class="bid-title"><h3>Record the winning bid</h3><span>Bid out loud with your mates</span></div><div id="winner-options" class="winner-options" aria-label="Choose the buyer"></div><div class="price-row"><label for="bid-price">Price paid</label><div class="price-input"><span>£</span><input id="bid-price" type="number" inputmode="numeric" min="0" max="1000" step="1" value="1" aria-label="Winning bid in whole millions"><span>m</span></div></div><div class="price-presets"><button type="button" data-price="1">£1m</button><button type="button" data-price="5">£5m</button><button type="button" data-price="10">£10m</button><button type="button" data-price="50">£50m</button></div><p id="bid-error" class="error-message" role="status" aria-live="polite"></p><button id="sell" type="submit" class="primary-button" disabled>Confirm sale <span aria-hidden="true">→</span></button><button id="pass" type="button" class="text-button pass-button">No bids? Return player to the wheel</button></form>
           <div id="sold-actions" class="sold-actions" hidden><button id="next-player" class="primary-button">Next player <span aria-hidden="true">↻</span></button><button id="view-buyer" class="secondary-button">Place on team pitch →</button><button id="undo" class="text-button">Undo this sale</button></div>
           <div id="completion" class="completion" hidden><h3>That’s the auction!</h3><p>Arrange your XIs, reveal the bargains and big spends, then settle it on the pitch.</p><button id="review-teams" class="primary-button">Arrange the teams →</button><button id="review-auction" class="secondary-button">Awards & league →</button><button id="undo-final" class="text-button">Undo last sale</button></div>
           <section id="skipped-players" class="skipped-players" hidden><div class="section-heading"><h3>Skipped players</h3><span id="skipped-count" class="badge"></span></div><p id="skipped-note" class="muted-note"></p><div id="skipped-list"></div></section>
@@ -277,7 +278,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
 })(globalThis);
 </script><script>(function (scope) {
   const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
-  const STARTING_BUDGET = 1000; // Tenths of a million: integer arithmetic avoids rounding errors.
+  const STARTING_BUDGET = 1000; // Whole millions: £1bn each, with integer arithmetic.
   function shuffle(items, random = Math.random) {
     const copy = items.slice();
     for (let i = copy.length - 1; i > 0; i--) {
@@ -357,7 +358,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     if (game.phase !== 'revealed' || !game.currentId || !game.remaining.includes(game.currentId)) return { error: 'Spin to reveal a player first.' };
     const manager = game.managers.find(manager => manager.id === managerId);
     if (!manager) return { error: 'Choose the winning manager.' };
-    if (!Number.isInteger(price) || price < 0) return { error: 'Enter a price in £0.1m increments, including £0 for a free transfer.' };
+    if (!Number.isInteger(price) || price < 0) return { error: 'Enter a whole-million price, including £0 for a free transfer.' };
     if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
@@ -620,6 +621,56 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
   const api = { VERSION, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);
+</script><script>(function (scope) {
+  // Synthesised effects: no audio files, and nothing plays until the first tap unlocks audio.
+  const key = 'touchline-sound';
+  let context = null, enabled = true;
+  try { enabled = localStorage.getItem(key) !== 'off'; } catch {}
+  function audio() {
+    const Audio = scope.AudioContext || scope.webkitAudioContext;
+    if (!Audio) return null;
+    if (!context) context = new Audio();
+    if (context.state === 'suspended') context.resume().catch(() => {});
+    return context;
+  }
+  function tone(frequency, start, duration, { type = 'sine', volume = .14, slide = null } = {}) {
+    const output = enabled && context && audio();
+    if (!output) return;
+    const at = output.currentTime + start, oscillator = output.createOscillator(), gain = output.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, at);
+    if (slide) oscillator.frequency.exponentialRampToValueAtTime(slide, at + duration);
+    gain.gain.setValueAtTime(.0001, at);
+    gain.gain.exponentialRampToValueAtTime(volume, at + .01);
+    gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    oscillator.connect(gain).connect(output.destination);
+    oscillator.start(at); oscillator.stop(at + duration + .05);
+  }
+  const api = {
+    get enabled() { return enabled; },
+    unlock() { if (enabled) audio(); },
+    toggle() {
+      enabled = !enabled;
+      try { localStorage.setItem(key, enabled ? 'on' : 'off'); } catch {}
+      if (enabled) { audio(); tone(880, 0, .12, { type: 'triangle' }); }
+      return enabled;
+    },
+    // Wheel clicks that slow down like a decelerating spinner, then a reveal chime.
+    spin(seconds) {
+      let time = 0, gap = .04;
+      while (time < seconds - .15) { tone(1500, time, .025, { type: 'square', volume: .04 }); time += gap; gap *= 1.11; }
+      tone(523, seconds, .18, { type: 'triangle' }); tone(784, seconds + .09, .32, { type: 'triangle' });
+    },
+    bid(mine = false) {
+      const base = mine ? 880 : 660;
+      tone(base, 0, .1, { type: 'triangle', volume: .16 }); tone(base * 1.5, .07, .16, { type: 'triangle', volume: .14 });
+    },
+    sold(mine = false) {
+      [523, 659, 784, mine ? 1047 : 988].forEach((frequency, index) => tone(frequency, index * .09, .28, { type: 'triangle', volume: .13 }));
+    },
+  };
+  scope.TouchlineSound = api;
+})(globalThis);
 </script><script>(() => {
   'use strict';
   const { players, clubs } = globalThis.DRAFT_GAME_DATA;
@@ -633,7 +684,8 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
   let game = null, league = null, showRatings = true, selectedManager = null, selectedPlayer = null, buyerId = null, view = 'auction';
   let spinning = false, rotation = 0, spinTimer = null, spinEpoch = 0, setupCache = null;
   let pending = { seasonMin: 0, seasonMax: seasons.length - 1, ratingMin: 40, ratingMax: 95, mode: 'peak' };
-  const money = tenths => `£${Number((tenths / 10).toFixed(1))}m`;
+  const money = millions => millions >= 1000 ? `£${+(millions / 1000).toFixed(3)}bn` : `£${millions}m`;
+  const sound = globalThis.TouchlineSound;
   const entryFor = id => game?.pool.find(entry => entry.id === id);
   const managerFor = id => game?.managers.find(manager => manager.id === id);
   const colourFor = id => colours[game.managers.findIndex(manager => manager.id === id)] || colours[0];
@@ -702,7 +754,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
       const eligible = core.candidates(players, config);
       setupCache = { key, eligibleCount: eligible.length, result: core.balance(eligible, config.formation, config.managerCount, () => .47) };
     }
-    $('setup-pool').textContent = `${config.managerCount * 11} players · ${config.managerCount} managers · £100m each`;
+    $('setup-pool').textContent = `${config.managerCount * 11} players · ${config.managerCount} managers · £1bn each`;
     const quotas = new Map();
     draft.formations[config.formation].forEach(slot => quotas.set(slot.position, (quotas.get(slot.position) || 0) + config.managerCount));
     $('setup-coverage').textContent = `${setupCache.eligibleCount.toLocaleString()} eligible footballers. Pool covers ${[...quotas].map(([position, count]) => `${count} ${position}`).join(' · ')}.`;
@@ -812,8 +864,8 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
   function bidValue() {
     const raw = $('bid-price').value.trim();
     if (!raw) return null;
-    const amount = Number(raw) * 10;
-    return Number.isFinite(amount) && amount >= 0 && Math.abs(amount - Math.round(amount)) < 1e-6 ? Math.round(amount) : null;
+    const amount = Number(raw);
+    return Number.isInteger(amount) && amount >= 0 ? amount : null;
   }
   function renderBid() {
     const price = bidValue();
@@ -824,7 +876,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     }).join('');
     let error = '';
     const buyer = managerFor(buyerId);
-    if (price === null) error = 'Use a price in £0.1m increments. £0 is allowed.';
+    if (price === null) error = 'Use a whole-million price. £0 is allowed.';
     else if (buyer && price > core.budget(game, buyerId)) error = `${buyer.name} only has ${money(core.budget(game, buyerId))} left.`;
     else if (buyer && core.purchases(game, buyerId).length >= 11) error = `${buyer.name} already has 11 players.`;
     $('bid-error').textContent = error;
@@ -939,7 +991,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     const landing = 360 - (Math.floor(Math.random() * 12) + .5) * 30;
     const duration = matchMedia('(prefers-reduced-motion:reduce)').matches ? 180 : 2400;
     const canvas = $('wheel');
-    canvas.getBoundingClientRect();
+    canvas.getBoundingClientRect(); sound.spin(duration / 1000);
     rotation += 360 * 5 + landing;
     canvas.style.transition = `transform ${duration}ms cubic-bezier(.14,.65,.14,1)`;
     canvas.style.transform = `rotate(${rotation}deg)`;
@@ -992,6 +1044,9 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     const button = event.target.closest('[data-team]');
     if (button) { selectedManager = button.dataset.team; selectedPlayer = null; renderGame(); save(); }
   });
+  $('sound-toggle').checked = sound.enabled;
+  $('sound-toggle').addEventListener('change', () => { if ($('sound-toggle').checked !== sound.enabled) sound.toggle(); });
+  document.addEventListener('pointerdown', () => sound.unlock(), true);
   $('ratings-toggle').addEventListener('change', () => { showRatings = $('ratings-toggle').checked; save(); renderGame(); });
   $('spin').addEventListener('click', spin); $('next-player').addEventListener('click', spin);
   $('winner-options').addEventListener('click', event => {
@@ -1006,7 +1061,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     if (price === null) { renderBid(); return; }
     const result = core.buy(game, buyerId, price);
     if (result.error) { $('bid-error').textContent = result.error; return; }
-    game = result.game; selectedManager = buyerId; selectedPlayer = game.currentId;
+    game = result.game; selectedManager = buyerId; selectedPlayer = game.currentId; sound.sold();
     save(); renderGame(); notify(`${managerFor(buyerId).name} bought ${entryFor(game.currentId).player.name} for ${money(price)}. Tap Teams to place the player.`);
   });
   $('pass').addEventListener('click', () => {
@@ -1019,7 +1074,7 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
     if (spinning) return;
     const result = core.undo(game); if (result.error) return notify(result.error, true);
     const last = game.sales.at(-1);
-    game = result.game; buyerId = last.managerId; selectedPlayer = null; $('bid-price').value = last.price / 10;
+    game = result.game; buyerId = last.managerId; selectedPlayer = null; $('bid-price').value = last.price;
     save(); renderGame(); notify('Sale undone. The budget is refunded and the player is back up for auction.');
   }
   $('undo').addEventListener('click', undo); $('undo-final').addEventListener('click', undo);

@@ -129,7 +129,7 @@ function apply(room, uid, command, now) {
       if (now < room.round.opensAt) fail('Wait for the player to be revealed.', 409);
       if (!active(room).includes(me.managerId)) fail('You are out of this auction or your XI is full.', 409);
       const amount = command.price, bid = leading(room);
-      if (!Number.isInteger(amount) || amount < 0) fail('Bid in £0.1m increments.');
+      if (!Number.isInteger(amount) || amount < 0) fail('Bid in whole millions.');
       if (bid && amount <= bid[1]) fail('Your bid must beat the current highest bid.', 409);
       if (amount > auction.budget(room.game, me.managerId)) fail('That bid exceeds your remaining budget.');
       room.round.offers[me.managerId] = amount;
@@ -141,6 +141,7 @@ function apply(room, uid, command, now) {
     case 'withdraw':
       if (now < room.round.opensAt) fail('Wait for the player to be revealed.', 409);
       if (!active(room).includes(me.managerId)) fail('You have already backed out or your XI is full.', 409);
+      if (room.round.offers[me.managerId] !== undefined) fail('You have bid on this player, so you are locked in.', 409);
       room.round.withdrawn.push(me.managerId); resolve(room, now); break;
     case 'skip':
       host(room, uid);
@@ -156,6 +157,10 @@ function apply(room, uid, command, now) {
       if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
       if (!auction.purchases(room.game, me.managerId).some(sale => sale.playerId === command.playerId)) fail('You can only move your own players.', 403);
       room.game = auction.unplace(room.game, me.managerId, command.playerId); break;
+    case 'clearBoard': {
+      if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
+      room.game = { ...room.game, managers: room.game.managers.map(manager => manager.id === me.managerId ? { ...manager, board: Array(11).fill(null) } : manager) }; break;
+    }
     case 'autoPlace': {
       if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
       const manager = room.game.managers.find(manager => manager.id === me.managerId);
@@ -200,7 +205,7 @@ function entryView(entry) {
 }
 function view(room, uid) {
   const me = member(room, uid);
-  const round = room.round && { ...room.round, leader: leading(room) ? { managerId: leading(room)[0], price: leading(room)[1] } : null, active: active(room) };
+  const round = room.round && { ...room.round, leader: leading(room) ? { managerId: leading(room)[0], price: leading(room)[1] } : null, active: active(room), bidders: Object.keys(room.round.offers) };
   if (round) delete round.offers;
   const skipped = room.game?.skipped || [];
   const known = room.game ? new Set([...room.game.sales.map(sale => sale.playerId), ...skipped, ...(room.round ? [room.round.playerId] : [])]) : new Set();

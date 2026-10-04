@@ -1,6 +1,6 @@
 (function (scope) {
   const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
-  const STARTING_BUDGET = 1000; // Tenths of a million: integer arithmetic avoids rounding errors.
+  const STARTING_BUDGET = 1000; // Whole millions: £1bn each, with integer arithmetic.
   function shuffle(items, random = Math.random) {
     const copy = items.slice();
     for (let i = copy.length - 1; i > 0; i--) {
@@ -80,7 +80,7 @@
     if (game.phase !== 'revealed' || !game.currentId || !game.remaining.includes(game.currentId)) return { error: 'Spin to reveal a player first.' };
     const manager = game.managers.find(manager => manager.id === managerId);
     if (!manager) return { error: 'Choose the winning manager.' };
-    if (!Number.isInteger(price) || price < 0) return { error: 'Enter a price in £0.1m increments, including £0 for a free transfer.' };
+    if (!Number.isInteger(price) || price < 0) return { error: 'Enter a whole-million price, including £0 for a free transfer.' };
     if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];

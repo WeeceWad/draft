@@ -11,7 +11,8 @@
   let game = null, league = null, showRatings = true, selectedManager = null, selectedPlayer = null, buyerId = null, view = 'auction';
   let spinning = false, rotation = 0, spinTimer = null, spinEpoch = 0, setupCache = null;
   let pending = { seasonMin: 0, seasonMax: seasons.length - 1, ratingMin: 40, ratingMax: 95, mode: 'peak' };
-  const money = tenths => `£${Number((tenths / 10).toFixed(1))}m`;
+  const money = millions => millions >= 1000 ? `£${+(millions / 1000).toFixed(3)}bn` : `£${millions}m`;
+  const sound = globalThis.TouchlineSound;
   const entryFor = id => game?.pool.find(entry => entry.id === id);
   const managerFor = id => game?.managers.find(manager => manager.id === id);
   const colourFor = id => colours[game.managers.findIndex(manager => manager.id === id)] || colours[0];
@@ -80,7 +81,7 @@
       const eligible = core.candidates(players, config);
       setupCache = { key, eligibleCount: eligible.length, result: core.balance(eligible, config.formation, config.managerCount, () => .47) };
     }
-    $('setup-pool').textContent = `${config.managerCount * 11} players · ${config.managerCount} managers · £100m each`;
+    $('setup-pool').textContent = `${config.managerCount * 11} players · ${config.managerCount} managers · £1bn each`;
     const quotas = new Map();
     draft.formations[config.formation].forEach(slot => quotas.set(slot.position, (quotas.get(slot.position) || 0) + config.managerCount));
     $('setup-coverage').textContent = `${setupCache.eligibleCount.toLocaleString()} eligible footballers. Pool covers ${[...quotas].map(([position, count]) => `${count} ${position}`).join(' · ')}.`;
@@ -190,8 +191,8 @@
   function bidValue() {
     const raw = $('bid-price').value.trim();
     if (!raw) return null;
-    const amount = Number(raw) * 10;
-    return Number.isFinite(amount) && amount >= 0 && Math.abs(amount - Math.round(amount)) < 1e-6 ? Math.round(amount) : null;
+    const amount = Number(raw);
+    return Number.isInteger(amount) && amount >= 0 ? amount : null;
   }
   function renderBid() {
     const price = bidValue();
@@ -202,7 +203,7 @@
     }).join('');
     let error = '';
     const buyer = managerFor(buyerId);
-    if (price === null) error = 'Use a price in £0.1m increments. £0 is allowed.';
+    if (price === null) error = 'Use a whole-million price. £0 is allowed.';
     else if (buyer && price > core.budget(game, buyerId)) error = `${buyer.name} only has ${money(core.budget(game, buyerId))} left.`;
     else if (buyer && core.purchases(game, buyerId).length >= 11) error = `${buyer.name} already has 11 players.`;
     $('bid-error').textContent = error;
@@ -317,7 +318,7 @@
     const landing = 360 - (Math.floor(Math.random() * 12) + .5) * 30;
     const duration = matchMedia('(prefers-reduced-motion:reduce)').matches ? 180 : 2400;
     const canvas = $('wheel');
-    canvas.getBoundingClientRect();
+    canvas.getBoundingClientRect(); sound.spin(duration / 1000);
     rotation += 360 * 5 + landing;
     canvas.style.transition = `transform ${duration}ms cubic-bezier(.14,.65,.14,1)`;
     canvas.style.transform = `rotate(${rotation}deg)`;
@@ -370,6 +371,9 @@
     const button = event.target.closest('[data-team]');
     if (button) { selectedManager = button.dataset.team; selectedPlayer = null; renderGame(); save(); }
   });
+  $('sound-toggle').checked = sound.enabled;
+  $('sound-toggle').addEventListener('change', () => { if ($('sound-toggle').checked !== sound.enabled) sound.toggle(); });
+  document.addEventListener('pointerdown', () => sound.unlock(), true);
   $('ratings-toggle').addEventListener('change', () => { showRatings = $('ratings-toggle').checked; save(); renderGame(); });
   $('spin').addEventListener('click', spin); $('next-player').addEventListener('click', spin);
   $('winner-options').addEventListener('click', event => {
@@ -384,7 +388,7 @@
     if (price === null) { renderBid(); return; }
     const result = core.buy(game, buyerId, price);
     if (result.error) { $('bid-error').textContent = result.error; return; }
-    game = result.game; selectedManager = buyerId; selectedPlayer = game.currentId;
+    game = result.game; selectedManager = buyerId; selectedPlayer = game.currentId; sound.sold();
     save(); renderGame(); notify(`${managerFor(buyerId).name} bought ${entryFor(game.currentId).player.name} for ${money(price)}. Tap Teams to place the player.`);
   });
   $('pass').addEventListener('click', () => {
@@ -397,7 +401,7 @@
     if (spinning) return;
     const result = core.undo(game); if (result.error) return notify(result.error, true);
     const last = game.sales.at(-1);
-    game = result.game; buyerId = last.managerId; selectedPlayer = null; $('bid-price').value = last.price / 10;
+    game = result.game; buyerId = last.managerId; selectedPlayer = null; $('bid-price').value = last.price;
     save(); renderGame(); notify('Sale undone. The budget is refunded and the player is back up for auction.');
   }
   $('undo').addEventListener('click', undo); $('undo-final').addEventListener('click', undo);

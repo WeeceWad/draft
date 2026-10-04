@@ -24,7 +24,7 @@ for (let index = 0; index < game.pool.length; index++) game = auction.buy({ ...g
     const noOverflow = async () => assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'No horizontal document overflow');
     assert.equal(await page.locator('.award-card').count(), 3);
     assert.equal(await page.locator('.comparison-card').count(), 3);
-    assert.match(await page.locator('.award-card').first().innerText(), /£30m/);
+    assert.match(await page.locator('.award-card').first().innerText(), /£300m/);
     assert(await page.locator('#start-league').isDisabled());
     assert.match(await page.locator('#league-readiness').innerText(), /Place all 11/);
     await page.locator('#finish-teams').click();

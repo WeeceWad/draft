@@ -14,7 +14,7 @@ for (let index = 0; index < 33; index++) {
   assert.equal(room.round.returning, false); firstCycle.push(room.round.playerId);
   if (index === 0) for (const uid of ['a', 'b', 'c']) act(uid, 'withdraw');
   else if (index === 2) {
-    act('a', 'bid', { price: 100 }); act('a', 'withdraw'); now = room.round.deadline; act(null, 'tick');
+    act('b', 'withdraw'); act('a', 'skip');
   } else act('a', 'skip');
   assert.equal(room.round.status, 'passed');
   assert.deepEqual(room.game.skipped, firstCycle);
