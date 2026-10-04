@@ -126,8 +126,9 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     await host.locator('nav [data-do=tab][data-id=summary]').click(); await host.locator('[data-do=rematch]').click(); await host.locator('.big-code').waitFor();
     const newCode = await host.locator('.big-code').innerText();
     assert.notEqual(newCode, code); assert(host.url().endsWith(`?code=${newCode}`));
-    assert.equal(await host.locator('.member').count(), 1); assert.equal(await host.locator('.pill').first().innerText(), '1/3 joined');
-    await guest.locator('[data-do=rematch]').filter({ hasText: newCode }).waitFor(); await guest.locator('[data-do=rematch]').click(); await guest.locator('.big-code').waitFor();
+    // Everyone else follows the rematch into the new lobby automatically.
+    await guest.locator('.big-code').filter({ hasText: newCode }).waitFor(); await third.locator('.big-code').filter({ hasText: newCode }).waitFor();
+    assert.equal(await host.locator('.member').count(), 3);
     assert.equal(await guest.locator('.big-code').innerText(), newCode);
     // Opening the new invite link swaps the old finished room for the fresh lobby.
     await third.goto(`${base}/?code=${newCode}`); await third.locator('.big-code').waitFor();

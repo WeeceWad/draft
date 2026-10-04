@@ -58,6 +58,27 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .live-clock span{display:block;height:100%;background:var(--green);transition:width .3s linear}
 .live-panel .score{font-size:28px}
 .summary-stat span{display:block;overflow-wrap:anywhere}
+.goals li{flex-wrap:wrap}
+.goal-assist{flex-basis:100%;font-size:11px;color:#7f8ea5}
+.match-canvas{display:block;width:100%;border-radius:12px;background:#16492f;border:1px solid #2f5b45}
+.pitch-scoreboard{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;font-weight:800}
+.pitch-scoreboard .score{font-size:30px;color:var(--text)}
+.pitch-scoreboard .away{text-align:right}
+.kit{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 6px;vertical-align:middle}
+.home-kit{background:#6cb4ff}.away-kit{background:#ff7b7b}
+.ticker{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px;min-height:110px}
+.ticker li{display:flex;gap:10px;align-items:baseline;color:var(--muted)}
+.ticker li:first-child{color:var(--text)}
+.ticker .goal-event{color:var(--green)!important;font-weight:800}
+.ticker small{color:#7f8ea5}
+.watch-picker{display:flex;gap:8px;flex-wrap:wrap}
+.watch-picker button{flex:1;font-size:12px;min-height:38px;padding:6px 10px}
+.watch-picker .selected,.segmented .selected{background:var(--green);color:#13220d;border-color:var(--green)}
+.view-choice{display:grid;gap:6px}
+.segmented{display:flex;gap:6px}
+.segmented button{flex:1;min-height:40px;font-size:13px}
+@media(max-width:799px){.pitch-scoreboard .score{font-size:24px}.ticker{font-size:12px}}
+.match-canvas{max-width:760px;margin:0 auto}
 </style></head>
 <body><header class="top"><a class="brand" href="/">◈ <span>TOUCHLINE<small>LIVE AUCTION</small></span></a><div id="connection" class="connection">Connecting…</div><button id="sound-toggle" class="quiet" hidden>Sound on</button><button id="rating-toggle" class="quiet" hidden>Hide ratings</button></header><main id="app"><div class="panel">Connecting to Touchline…</div></main><div id="toast" role="status" aria-live="polite"></div><script>(function (scope) {
   const row = (positions, y, xs) => positions.map((position, i) => ({ position, x: xs[i], y }));
@@ -295,11 +316,13 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 </script><script>(function (scope) {
   const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
   const auction = typeof module !== 'undefined' ? require('./auction-core.js') : scope.AuctionCore;
-  const VERSION = 'touchline-head-to-head-v1';
+  const VERSION = 'touchline-head-to-head-v2';
+  const VERSIONS = ['touchline-head-to-head-v1', VERSION]; // v1 leagues replay with the current engine.
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const units = { GK: 'goalkeeping', CB: 'defence', LB: 'defence', RB: 'defence', CM: 'midfield', CDM: 'midfield', LM: 'midfield', RM: 'midfield', CAM: 'attack', LW: 'attack', RW: 'attack', ST: 'attack' };
   const unitWeights = { attack: .30, midfield: .30, defence: .28, goalkeeping: .12 };
   const scorerWeights = { GK: 0, CB: 1, LB: 2, RB: 2, LWB: 2, RWB: 2, CDM: 3, CM: 8, CAM: 13, LM: 9, RM: 9, LW: 15, RW: 15, ST: 20 };
+  const assistWeights = { GK: 0, LB: 4, CB: 1, RB: 4, LWB: 5, RWB: 5, CDM: 4, CM: 9, CAM: 14, LM: 11, RM: 11, LW: 13, RW: 13, ST: 8 };
   const defensive = new Set(['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB', 'CDM']);
   // Observed browser defaults, independently implemented. See docs/simulation-research.md.
   function naturalRank(position, positions) {
@@ -391,30 +414,64 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return count - 1;
   }
   const expectedGoals = (own, opponent, home) => clamp(1.35 + .05 * (own - opponent) + (home ? .35 : 0), .2, 4.5);
-  function goalEvents(squad, goals, random, tallies) {
+  // Goal times follow 38-0: 2% land in first-half and 4% in second-half stoppage time.
+  function goalTime(value) {
+    if (value >= .96) return { minute: 90, stoppage: Math.min(4, 1 + Math.floor((value - .96) / .04 * 4)) };
+    if (value >= .94) return { minute: 45, stoppage: Math.min(3, 1 + Math.floor((value - .94) / .02 * 3)) };
+    return { minute: Math.min(90, Math.max(1, Math.ceil(90 * Math.pow(value / .94, .82)))) };
+  }
+  const goalOrder = (a, b) => a.minute - b.minute || (a.stoppage ?? 0) - (b.stoppage ?? 0);
+  // Match clock from 0 to 97: 45+3 is 48 and 90+4 is 97.
+  const absoluteMinute = goal => goal.minute === 45 && goal.stoppage ? 45 + goal.stoppage : goal.minute === 90 && goal.stoppage ? 93 + goal.stoppage : goal.minute <= 45 ? goal.minute : goal.minute + 3;
+  const fromAbsolute = value => value <= 45 ? { minute: value } : value <= 48 ? { minute: 45, stoppage: value - 45 } : value <= 93 ? { minute: value - 3 } : { minute: 90, stoppage: value - 93 };
+  const minuteLabel = goal => goal.stoppage ? `${goal.minute}+${goal.stoppage}′` : `${goal.minute}′`;
+  // As in 38-0, no two goals in a match share a minute: clashes move later, within the final whistle.
+  function separate(...lists) {
+    const goals = lists.flat().sort(goalOrder), times = goals.map(absoluteMinute);
+    for (let index = 1; index < times.length; index++) if (times[index] <= times[index - 1]) times[index] = times[index - 1] + 1;
+    for (let index = times.length - 1; index >= 0; index--) { const limit = index === times.length - 1 ? 97 : times[index + 1] - 1; if (times[index] > limit) times[index] = Math.max(1, limit); }
+    goals.forEach((goal, index) => { const time = fromAbsolute(times[index]); goal.minute = time.minute; if (time.stoppage === undefined) delete goal.stoppage; else goal.stoppage = time.stoppage; });
+    for (const list of lists) list.sort(goalOrder);
+  }
+  // 38-0's season engine: 28% of goals are unassisted; otherwise a teammate weighted by role and rating.
+  function pickAssist(squad, scorerId, random) {
+    if (squad.length < 2 || random() > .72) return null;
+    const others = squad.filter(player => player.id !== scorerId);
+    const weights = others.map(player => (assistWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, 3.5));
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    if (!total) return null;
+    let draw = random() * total;
+    for (let index = 0; index < others.length; index++) if ((draw -= weights[index]) <= 0) return others[index];
+    return others.at(-1);
+  }
+  function goalEvents(squad, goals, random, tallies, assistRandom) {
     const result = [];
     for (let index = 0; index < goals; index++) {
-      const minute = clamp(Math.ceil(90 * Math.pow(random(), .82)), 1, 90);
+      const time = goalTime(random());
+      if (!squad.length) { result.push({ ...time, playerId: null, name: 'Goal' }); continue; }
       const weights = squad.map(player => {
         const capped = player.position === 'CDM' || player.positions[0] === 'CDM';
         if (capped && (tallies.get(player.id) || 0) >= 10) return 0;
         return (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4);
       });
-      let draw = random() * weights.reduce((sum, weight) => sum + weight, 0);
+      const total = weights.reduce((sum, weight) => sum + weight, 0);
       let scorer = squad.at(-1);
-      for (let index = 0; index < squad.length; index++) if (weights[index] > 0 && (draw -= weights[index]) <= 0) { scorer = squad[index]; break; }
-      if (!scorer) continue;
+      if (!total) scorer = squad[Math.floor(random() * squad.length)];
+      else { let draw = random() * total; for (let item = 0; item < squad.length; item++) if ((draw -= weights[item]) <= 0) { scorer = squad[item]; break; } }
       tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1);
-      result.push({ minute, playerId: scorer.id, name: scorer.name });
+      const assist = pickAssist(squad, scorer.id, assistRandom);
+      result.push({ ...time, playerId: scorer.id, name: scorer.name, ...(assist ? { assistId: assist.id, assistName: assist.name } : {}) });
     }
-    return result.sort((a, b) => a.minute - b.minute);
+    return result.sort(goalOrder);
   }
   function simulateMatch(home, away, seed, tallies = new Map()) {
-    const random = seeded((seed ^ 0x2c1b3c6d) >>> 0);
+    // The main stream mirrors 38-0's head-to-head exactly; assists use their own stream so they cannot disturb it.
+    const random = seeded((seed ^ 0x2c1b3c6d) >>> 0), assists = seeded((seed ^ 0x51a7c0de) >>> 0);
     const homeXg = expectedGoals(home.overall, away.overall, true), awayXg = expectedGoals(away.overall, home.overall, false);
     const homeGoals = poisson(homeXg, random), awayGoals = poisson(awayXg, random);
-    return { homeGoals, awayGoals, homeXg, awayXg,
-      homeScorers: goalEvents(home.squad, homeGoals, random, tallies), awayScorers: goalEvents(away.squad, awayGoals, random, tallies) };
+    const homeScorers = goalEvents(home.squad, homeGoals, random, tallies, assists), awayScorers = goalEvents(away.squad, awayGoals, random, tallies, assists);
+    separate(homeScorers, awayScorers);
+    return { homeGoals, awayGoals, homeXg, awayXg, homeScorers, awayScorers };
   }
   function create(game, seed = Math.floor(Math.random() * 4294967296)) {
     const check = readiness(game);
@@ -463,7 +520,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   function restore(saved, game) {
     try {
-      if (!saved || saved.version !== 1 || saved.engineVersion !== VERSION || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
+      if (!saved || saved.version !== 1 || !VERSIONS.includes(saved.engineVersion) || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
       if (JSON.stringify(saved.boards) !== JSON.stringify(game.managers.map(manager => ({ id: manager.id, board: manager.board })))) return null;
       let league = create(game, saved.seed).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
@@ -471,8 +528,212 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
+})(globalThis);
+</script><script>(function (scope) {
+  // Beta 2D match view. It never changes a result: it builds a seeded timeline of play that arrives at
+  // each real goal, on its real minute, through its real assister and scorer. Same seed, same match on every device.
+  const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
+  const leagueCore = typeof module !== 'undefined' ? require('./league-core.js') : scope.LeagueCore;
+  const L = 100, W = 64, M = 3, HALF = 48, SECOND = 48.6, END = 97; // Pitch units; times on the 0–97 match clock.
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const other = side => side === 'home' ? 'away' : 'home';
+  const lerp = (a, b, p) => ({ x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p });
+  const ease = p => p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+  const surname = name => String(name).split(' ').at(-1);
+  function seeded(seed) { let state = seed >>> 0; return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; }; }
+  // Home attack to the right in the first half and to the left after half-time.
+  const direction = (side, t) => (side === 'home') === (t < SECOND) ? 1 : -1;
+  // Where a player stands: their formation spot, shifted with the ball and possession, plus a little drift.
+  function spot(slot, index, side, t, ball, attacking) {
+    const dir = direction(side, t), progress = dir === 1 ? ball.x : L - ball.x;
+    let u = slot.position === 'GK' ? 3 + Math.max(0, progress - 45) * .1 : clamp(8 + (100 - slot.y) * .36 + (progress - 50) * .65 + (attacking ? 5 : -3), 7, 93);
+    let v = slot.x * W / 100;
+    v += (ball.y - v) * (slot.position === 'GK' ? .15 : .2);
+    u += Math.sin(t * 1.7 + index * 1.9) * 1.3; v += Math.cos(t * 1.4 + index * 2.7) * 1.6;
+    return { x: dir === 1 ? u : L - u, y: clamp(v, 1.5, W - 1.5) };
+  }
+  function build({ result, home, away, formation, seed }) {
+    const slots = draft.formations[formation], next = seeded(seed ^ 0x5eedba11), squads = { home: home.squad, away: away.squad };
+    const actions = [], events = [];
+    let ball = { x: L / 2, y: W / 2 }, team = 'home', holder = null, t = 0;
+    const at = (side, index, time) => spot(slots[index], index, side, time, ball, team === side);
+    const keeper = side => slots.findIndex(slot => slot.position === 'GK');
+    const name = (side, index) => squads[side][index]?.name || '';
+    const pick = weights => { const total = weights.reduce((sum, weight) => sum + weight, 0); let draw = next() * total; for (let index = 0; index < weights.length; index++) if ((draw -= weights[index]) <= 0) return index; return weights.length - 1; };
+    function push(action) {
+      actions.push({ ...action, team: action.team ?? team });
+      if (action.receiver) { holder = action.receiver; team = action.receiver.side; }
+      ball = action.to; t = action.t1;
+    }
+    const move = (side, index, duration, to = null, kind = 'pass') => push({ t0: t, t1: t + duration, from: ball, to: to || at(side, index, t + duration), passer: holder, receiver: { side, index }, kind });
+    const place = (point, side, index) => push({ t0: t, t1: t + .3, from: point, to: point, passer: null, receiver: { side, index }, kind: 'place' });
+    function teammate(side, forward = true) {
+      const dir = direction(side, t), progress = point => dir === 1 ? point.x : L - point.x;
+      const options = slots.map((slot, index) => ({ index, point: at(side, index, t) })).filter(option => slots[option.index].position !== 'GK' && !(holder?.side === side && holder.index === option.index));
+      return options[pick(options.map(option => Math.max(.05, forward ? 1 + (progress(option.point) - progress(ball)) / 25 : 1) / (1 + Math.hypot(option.point.x - ball.x, option.point.y - ball.y) / 30)))].index;
+    }
+    function nearest(side, point, excluding = -1) {
+      let best = 0, distance = Infinity;
+      slots.forEach((slot, index) => { if (index === excluding || slot.position === 'GK') return; const p = at(side, index, t), d = Math.hypot(p.x - point.x, p.y - point.y); if (d < distance) { distance = d; best = index; } });
+      return best;
+    }
+    function step(stop) {
+      const room = stop - t, duration = Math.min(room, .9 + next() * 1.3), dir = direction(team, t), progress = dir === 1 ? ball.x : L - ball.x, roll = next();
+      const goalX = dir === 1 ? L : 0;
+      if (progress > 58 && roll < .34 && room > 5) {
+        const defending = other(team), shooter = holder;
+        const outcome = next();
+        if (outcome < .45) {
+          push({ t0: t, t1: t + .7, from: ball, to: { x: goalX - dir * 2, y: W / 2 + (next() - .5) * 6 }, passer: shooter, receiver: { side: defending, index: keeper(defending) }, kind: 'shot' });
+          events.push({ t, side: shooter.side, text: `Saved! ${surname(name(defending, keeper(defending)))} holds ${surname(name(shooter.side, shooter.index))}’s shot` });
+          move(defending, teammate(defending), 1.4);
+        } else if (outcome < .8) {
+          push({ t0: t, t1: t + .7, from: ball, to: { x: goalX + dir * 2, y: W / 2 + (next() < .5 ? -1 : 1) * (5 + next() * 5) }, passer: shooter, receiver: null, kind: 'shot' });
+          events.push({ t, side: shooter.side, text: `${surname(name(shooter.side, shooter.index))} shoots wide` });
+          t += .5; place({ x: goalX - dir * 6, y: W / 2 }, defending, keeper(defending));
+          events.push({ t, side: defending, text: 'Goal kick' });
+          move(defending, teammate(defending), 1.6);
+        } else {
+          const flag = next() < .5 ? .4 : W - .4;
+          push({ t0: t, t1: t + .7, from: ball, to: { x: goalX + dir * .8, y: flag < W / 2 ? 4 : W - 4 }, passer: shooter, receiver: null, kind: 'shot' });
+          events.push({ t, side: shooter.side, text: `${surname(name(shooter.side, shooter.index))}’s shot is deflected wide` });
+          const taker = slots.findIndex(slot => ['LW', 'RW', 'LM', 'RM', 'CAM', 'CM'].includes(slot.position));
+          t += .4; place({ x: goalX, y: flag }, shooter.side, Math.max(0, taker));
+          events.push({ t, side: shooter.side, text: 'Corner' });
+          const target = { x: goalX - dir * 8, y: W / 2 + (next() - .5) * 8 };
+          move(shooter.side, teammate(shooter.side), 1.1, target);
+          const clearer = nearest(defending, ball);
+          move(defending, clearer, .9, { x: goalX - dir * 24, y: W / 2 + (next() - .5) * 30 }, 'clear');
+          events.push({ t, side: defending, text: `${surname(name(defending, clearer))} clears` });
+        }
+        return;
+      }
+      const play = next();
+      if (play < .12 && room > duration + 1.5) {
+        const to = { x: clamp(ball.x + dir * (4 + next() * 10), 4, 96), y: next() < .5 ? .3 : W - .3 };
+        push({ t0: t, t1: t + duration, from: ball, to, passer: holder, receiver: null, kind: 'pass' });
+        const side = other(team), taker = nearest(side, to);
+        place(to, side, taker); team = side;
+        events.push({ t, side, text: 'Throw-in' });
+        move(side, teammate(side), 1);
+        return;
+      }
+      if (play < .3) {
+        const target = at(team, teammate(team), t + duration), point = lerp(ball, target, .4 + next() * .4), side = other(team), tackler = nearest(side, point);
+        move(side, tackler, duration * .6, point, 'tackle');
+        if (next() < .35) events.push({ t, side, text: `${surname(name(side, tackler))} wins it back` });
+        return;
+      }
+      if (play < .45 && holder) {
+        const runner = holder;
+        if (next() < .3) events.push({ t, side: runner.side, text: `${surname(name(runner.side, runner.index))} drives forward` });
+        move(runner.side, runner.index, duration, { x: clamp(ball.x + dir * (6 + next() * 8), 4, 96), y: clamp(ball.y + (next() - .5) * 10, 3, W - 3) }, 'dribble');
+        return;
+      }
+      const passer = holder, receiver = teammate(team), side = team, start = t;
+      move(side, receiver, duration);
+      const reached = direction(side, t) === 1 ? ball.x : L - ball.x;
+      if (passer && passer.side === side && reached > 70 && next() < .35) events.push({ t: start, side, text: `${surname(name(side, passer.index))} finds ${surname(name(side, receiver))} in the final third` });
+    }
+    function finale(goal) {
+      const side = goal.side, dir = direction(side, goal.at), goalX = dir === 1 ? L : 0;
+      const scorer = Math.max(0, squads[side].findIndex(player => player.id === goal.playerId));
+      const assister = goal.assistId ? squads[side].findIndex(player => player.id === goal.assistId) : -1;
+      const steps = (team !== side ? 1 : 0) + (assister >= 0 ? 2 : 1) + 1;
+      t = Math.min(t, goal.at - .6);
+      const each = (goal.at - t) / steps, shooting = { x: goalX - dir * (9 + next() * 9), y: W / 2 + (next() - .5) * 20 };
+      if (team !== side) move(side, nearest(side, ball, scorer), each, null, 'tackle');
+      if (assister >= 0) { move(side, assister, each); move(side, scorer, each, shooting); }
+      else move(side, scorer, each, shooting, holder?.side === side && holder.index === scorer ? 'dribble' : 'pass');
+      push({ t0: t, t1: goal.at, from: ball, to: { x: goalX + dir * 1.6, y: W / 2 + (next() - .5) * 5 }, passer: { side, index: scorer }, receiver: null, team: side, kind: 'goal' });
+      events.push({ t: goal.at, side, goal: true, text: `GOAL! ${goal.name}`, assist: goal.assistName || null });
+      team = other(side); holder = null;
+    }
+    function segment(start, stop, kicker, goal) {
+      t = start; team = kicker; ball = { x: L / 2, y: W / 2 };
+      const striker = slots.findIndex(slot => slot.position === 'ST');
+      holder = { side: kicker, index: striker >= 0 ? striker : 10 };
+      const reserve = goal ? Math.min(3.2, Math.max(.7, goal.at - start - 1.2)) : .4, limit = (goal ? goal.at : stop) - reserve;
+      if (limit - t > 1.2) { events.push({ t, side: kicker, text: 'Kick-off' }); move(kicker, teammate(kicker, false), .9); }
+      while (t + 1 < limit) step(limit);
+      if (goal) finale(goal);
+    }
+    const goals = [...result.homeScorers.map(goal => ({ ...goal, side: 'home' })), ...result.awayScorers.map(goal => ({ ...goal, side: 'away' }))]
+      .map(goal => ({ ...goal, at: leagueCore.absoluteMinute(goal) })).sort((a, b) => a.at - b.at);
+    function half(start, stop, kicker, list) {
+      let from = start, side = kicker;
+      list.forEach((goal, index) => {
+        segment(from, stop, side, goal);
+        from = Math.min(goal.at + 1.2, (list[index + 1]?.at ?? Infinity) - .7); side = other(goal.side);
+      });
+      if (from < stop - .5) segment(from, stop, side, null);
+      events.push({ t: stop, text: stop === END ? 'Full time' : 'Half-time' });
+    }
+    half(0, HALF, 'home', goals.filter(goal => goal.at <= HALF));
+    half(SECOND, END, 'away', goals.filter(goal => goal.at > HALF));
+    actions.sort((a, b) => a.t0 - b.t0);
+    return { actions, events: events.sort((a, b) => a.t - b.t), slots, squads };
+  }
+  function current(timeline, t) {
+    let low = 0, high = timeline.actions.length - 1, found = -1;
+    while (low <= high) { const mid = (low + high) >> 1; if (timeline.actions[mid].t0 <= t) { found = mid; low = mid + 1; } else high = mid - 1; }
+    return found >= 0 ? timeline.actions[found] : null;
+  }
+  function state(timeline, t) {
+    const action = current(timeline, t), progress = action ? clamp((t - action.t0) / Math.max(.01, action.t1 - action.t0), 0, 1) : 0;
+    const ball = !action ? { x: L / 2, y: W / 2 } : lerp(action.from, action.to, ease(progress)), team = action?.team || 'home';
+    const players = [];
+    for (const side of ['home', 'away']) timeline.slots.forEach((slot, index) => {
+      let point = spot(slot, index, side, t, ball, team === side);
+      const is = who => who && who.side === side && who.index === index;
+      if (action && is(action.receiver)) point = progress >= 1 ? ball : lerp(point, action.to, Math.pow(progress, 1.5));
+      else if (action && is(action.passer) && progress < 1) point = lerp(action.from, point, ease(progress));
+      players.push({ side, index, keeper: slot.position === 'GK', x: point.x, y: point.y, name: timeline.squads[side][index]?.name || '', holder: action && is(action.receiver) && progress >= .95 });
+    });
+    return { ball, players, action };
+  }
+  function draw(canvas, timeline, t, colours) {
+    const context = canvas.getContext('2d'), scale = canvas.width / (L + 2 * M), px = value => (value + M) * scale;
+    context.fillStyle = '#16492f'; context.fillRect(0, 0, canvas.width, canvas.height);
+    for (let band = 0; band < 10; band++) { context.fillStyle = band % 2 ? '#1a5236' : '#1d5a3c'; context.fillRect(px(band * L / 10), px(0), L / 10 * scale, W * scale); }
+    context.strokeStyle = 'rgba(255,255,255,.55)'; context.lineWidth = Math.max(1, scale * .3);
+    context.strokeRect(px(0), px(0), L * scale, W * scale);
+    context.beginPath(); context.moveTo(px(L / 2), px(0)); context.lineTo(px(L / 2), px(W)); context.stroke();
+    context.beginPath(); context.arc(px(L / 2), px(W / 2), 8.7 * scale, 0, Math.PI * 2); context.stroke();
+    for (const end of [0, L]) {
+      const dir = end === 0 ? 1 : -1;
+      context.strokeRect(Math.min(px(end), px(end + dir * 16)), px(W / 2 - 20), 16 * scale, 40 * scale);
+      context.strokeRect(Math.min(px(end), px(end + dir * 5.5)), px(W / 2 - 9), 5.5 * scale, 18 * scale);
+      context.fillStyle = 'rgba(255,255,255,.85)'; context.fillRect(Math.min(px(end), px(end - dir * 1.6)), px(W / 2 - 3.6), 1.6 * scale, 7.2 * scale);
+    }
+    const now = state(timeline, t), radius = 1.25 * scale;
+    for (const player of now.players) {
+      context.beginPath(); context.arc(px(player.x), px(player.y), radius, 0, Math.PI * 2);
+      context.fillStyle = player.keeper ? colours[player.side + 'Keeper'] : colours[player.side]; context.fill();
+      context.lineWidth = Math.max(1, scale * .25); context.strokeStyle = '#0c1018'; context.stroke();
+    }
+    const holder = now.players.find(player => player.holder);
+    if (holder) {
+      context.font = `700 ${Math.max(10, 2.6 * scale)}px system-ui, sans-serif`; context.textAlign = 'center';
+      context.fillStyle = 'rgba(12,16,24,.75)'; const label = surname(holder.name), width = context.measureText(label).width + 8;
+      context.fillRect(px(holder.x) - width / 2, px(holder.y) - radius - 3.4 * scale - 2, width, 3.4 * scale);
+      context.fillStyle = '#fff'; context.fillText(label, px(holder.x), px(holder.y) - radius - 1.2 * scale);
+    }
+    context.beginPath(); context.arc(px(now.ball.x), px(now.ball.y), .85 * scale, 0, Math.PI * 2);
+    context.fillStyle = '#fff'; context.fill(); context.lineWidth = 1; context.strokeStyle = '#111'; context.stroke();
+    const goal = [...timeline.events].reverse().find(event => event.goal && event.t <= t && t - event.t < 1.3);
+    if (goal) {
+      context.fillStyle = 'rgba(12,16,24,.6)'; context.fillRect(0, canvas.height * .36, canvas.width, canvas.height * .28);
+      context.textAlign = 'center'; context.fillStyle = colours[goal.side];
+      context.font = `900 ${Math.round(canvas.height * .12)}px system-ui, sans-serif`; context.fillText('GOAL!', canvas.width / 2, canvas.height * .5);
+      context.fillStyle = '#fff'; context.font = `700 ${Math.round(canvas.height * .05)}px system-ui, sans-serif`;
+      context.fillText(goal.text.replace('GOAL! ', '') + (goal.assist ? ` · assist ${goal.assist}` : ''), canvas.width / 2, canvas.height * .59);
+    }
+  }
+  const api = { build, state, draw, ASPECT: (W + 2 * M) / (L + 2 * M), END };
+  if (typeof module !== 'undefined') module.exports = api; else scope.MatchView = api;
 })(globalThis);
 </script><script>(function (scope) {
   // Synthesised effects: no audio files, and nothing plays until the first tap unlocks audio.
@@ -541,7 +802,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
   let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
@@ -580,6 +841,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     showRatings = next.showRatings !== false;
     if (leaderMoved) { const min = minBid(next); if (newRound || !(Number(bidText) >= min)) bidText = String(min); }
     if (previous) cue(previous.round, next.round);
+    if (previous && !previous.next && next.next && next.finished) setTimeout(followNext, 0);
     if (first) { teamId = room.me; selectedSlot = null; tab = room.status === 'complete' ? 'league' : 'auction'; history.replaceState(null, '', `/?code=${room.code}`); }
     if (room.status === 'complete' && newRound) tab = 'league';
     if (previous && next.league && (!previous.league || previous.league.round !== next.league.round)) tab = 'league';
@@ -642,10 +904,10 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const round = room.round, player = round && entry(round.playerId), spinning = round?.status === 'open' && clock() < round.opensAt;
     const open = round?.status === 'open', out = round?.withdrawn.includes(room.me), leader = round?.leader;
     const keeper = !!player?.player.positions.includes('GK'), blocked = open && !out && !round.active.includes(room.me) ? blockedReason(room.me, keeper) : null;
-    const allowed = open && !spinning && !out && !blocked && connected && !busy && !(round.deadline && clock() >= round.deadline);
+    const allowed = open && !spinning && !out && !blocked && leader?.managerId !== room.me && connected && !busy && !(round.deadline && clock() >= round.deadline);
     const min = minBid(room), locked = open && leader?.managerId === room.me, broke = myBudget() === 0 && !myFull();
     const ended = round && !open;
-    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol line-${line(player.player.positions[0])}">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span>${positions(player.player.positions)}${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId), cannot = !full && !withdrew && open && !round.active.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew || cannot ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : cannot ? (keeper ? 'Has a GK' : 'Needs a GK') : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="numeric" type="number" min="${min}" max="${myBudget()}" step="1" placeholder="${min}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10, 50].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>Place bid${leader?.managerId === room.me ? ' · you’re leading' : ''}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed || locked)}>${out ? 'You’re out for this player' : blocked ? blocked : locked ? 'Locked in · you’re the highest bidder' : 'Back out for this player'}</button>${broke && !out ? '<p class="hint">You’re out of money. If everyone else backs out, bid £0 to take this player for free.</p>' : ''}<p class="hint">Bids are whole millions, from £1m. First bid starts 60 seconds; every later bid adds 10 seconds. The highest bidder is locked in. If you’re outbid, you can back out.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
+    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol line-${line(player.player.positions[0])}">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span>${positions(player.player.positions)}${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId), cannot = !full && !withdrew && open && !round.active.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew || cannot ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : cannot ? (keeper ? 'Has a GK' : 'Needs a GK') : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="numeric" type="number" min="${min}" max="${myBudget()}" step="1" placeholder="${min}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10, 50].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>${leader?.managerId === room.me ? 'You’re the highest bidder' : 'Place bid'}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed || locked)}>${out ? 'You’re out for this player' : blocked ? blocked : locked ? 'Locked in · you’re the highest bidder' : 'Back out for this player'}</button>${broke && !out ? '<p class="hint">You’re out of money. If everyone else backs out, bid £0 to take this player for free.</p>' : ''}<p class="hint">Bids are whole millions, from £1m. First bid starts 60 seconds; every later bid adds 10 seconds. The highest bidder is locked in and can’t bid again until someone outbids them. If you’re outbid, you can bid again or back out.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
   }
   function skippedPlayers() {
     const queued = room.game.skipped || [];
@@ -669,20 +931,62 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   function transfersScreen() { return `<section class="panel stack"><div class="row"><h2>Transfer board</h2><span class="pill">${room.game.sales.length} signings</span></div><p>Every deal, ordered from the biggest fee to the smallest.</p><div>${room.game.sales.slice().sort((a, b) => b.price - a.price).map((sale, i) => { const player = entry(sale.playerId); return `<div class="sale-row"><span class="muted">${i + 1}</span><div style="flex:1"><strong>${esc(player.player.name)} ${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</strong><small>${positions(player.player.positions)} ${esc(memberName(sale.managerId))} · ${esc(player.season.season)}</small></div><span class="price">${money(sale.price)}</span><button class="quiet" data-do="team" data-id="${sale.managerId}" aria-label="View ${esc(memberName(sale.managerId))}’s team">XI</button></div>`; }).join('') || '<div class="empty">No deals yet. The auction is where it all starts.</div>'}</div></section>`; }
   const liveNow = () => room?.live && clock() < room.live.endsAt ? room.live : null;
-  const liveMinute = live => Math.max(0, Math.min(90, Math.floor((clock() - live.startsAt) / (live.endsAt - live.startsAt) * 90)));
+  const liveClock = live => Math.max(0, Math.min(MatchView.END, (clock() - live.startsAt) / (live.endsAt - live.startsAt) * MatchView.END));
+  const liveMinute = live => Math.floor(liveClock(live));
+  const clockLabel = value => value <= 45 ? `${value}′` : value <= 48 ? `45+${value - 45}′` : value <= 93 ? `${value - 3}′` : `90+${value - 93}′`;
+  const pitchColours = { home: '#6cb4ff', homeKeeper: '#ffd84d', away: '#ff7b7b', awayKeeper: '#c792ff' };
+  function watchedFixture(live) {
+    const fixtures = liveFixtures(live);
+    return fixtures.find(fixture => fixture.id === watchFixture) || fixtures.find(fixture => fixture.homeId === room.me || fixture.awayId === room.me) || fixtures[0];
+  }
+  function timelineFor(live, fixture) {
+    const key = `${room.id}:${live.startsAt}:${fixture.id}`;
+    if (!timelines.has(key)) {
+      if (timelines.size > 20) timelines.clear();
+      const team = id => room.league.teams.find(team => team.id === id), index = liveFixtures(live).indexOf(fixture);
+      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), formation: room.game.config.formation, seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0 }));
+    }
+    return timelines.get(key);
+  }
   const liveFixtures = live => room.league.fixtures.filter(fixture => fixture.round === live.round);
-  const goalsBy = (live, minute) => liveFixtures(live).reduce((sum, fixture) => sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => goal.minute <= minute).length, 0);
+  const goalsBy = (live, minute) => liveFixtures(live).reduce((sum, fixture) => sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length, 0);
   // Scorers sit under their own team, one per line, with the minute beside them.
-  function fixtureCard(fixture, minute = 90) {
-    const result = fixture.result, upTo = goals => (goals || []).filter(goal => goal.minute <= minute);
+  function fixtureCard(fixture, minute = MatchView.END) {
+    const result = fixture.result, upTo = goals => (goals || []).filter(goal => LeagueCore.absoluteMinute(goal) <= minute);
     const home = upTo(result?.homeScorers), away = upTo(result?.awayScorers);
-    const list = goals => goals.map(goal => `<li><span class="goal-name">${esc(goal.name)}</span><span class="goal-minute">${goal.minute}′</span></li>`).join('');
+    const list = goals => goals.map(goal => `<li><span class="goal-name">${esc(goal.name)}</span><span class="goal-minute">${LeagueCore.minuteLabel(goal)}</span>${goal.assistName ? `<span class="goal-assist">Assist: ${esc(goal.assistName)}</span>` : ''}</li>`).join('');
     return `<div class="fixture"><div class="fixture-line"><span class="team-name">${esc(memberName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(memberName(fixture.awayId))}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}</div>`;
   }
-  function liveInner(live) {
-    const minute = liveMinute(live);
-    return `<div class="row"><div><div class="eyebrow live-label">● Live · Matchday ${live.round + 1}</div><h2 class="gap-top live-minute">${minute < 90 ? `${minute}′` : 'Full time'}</h2></div><span class="pill">${minute < 45 ? 'First half' : minute < 90 ? 'Second half' : 'Full time'}</span></div><div class="live-clock"><span style="width:${minute / 90 * 100}%"></span></div>${liveFixtures(live).map(fixture => fixtureCard(fixture, minute)).join('')}`;
+  function liveHead(live) {
+    const minute = liveMinute(live), done = minute >= MatchView.END, watched = live.view === 'pitch' ? watchedFixture(live) : null;
+    const score = watched && (side => watched.result[side].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length);
+    return `<div class="row"><div><div class="eyebrow live-label">● Live · Matchday ${live.round + 1}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${done ? 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${done ? 'Full time' : minute < 48 ? 'First half' : 'Second half'}</span></div><div class="live-clock"><span style="width:${minute / MatchView.END * 100}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit home-kit"></i>${esc(memberName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(memberName(watched.awayId))}<i class="kit away-kit"></i></span></div>` : ''}`;
   }
+  function liveRest(live) {
+    const minute = liveMinute(live), fixtures = liveFixtures(live);
+    if (live.view !== 'pitch') return fixtures.map(fixture => fixtureCard(fixture, minute)).join('');
+    const watched = watchedFixture(live), now = liveClock(live), teamOf = side => memberName(side === 'home' ? watched.homeId : watched.awayId);
+    const ticker = timelineFor(live, watched).events.filter(event => event.t <= now).slice(-5).reverse()
+      .map(event => `<li class="${event.goal ? 'goal-event' : ''}"><span class="goal-minute">${clockLabel(Math.min(MatchView.END, Math.ceil(event.t)))}</span><span>${esc(event.text)}${event.assist ? ` · assist ${esc(event.assist)}` : ''}${event.side ? ` <small>${esc(teamOf(event.side))}</small>` : ''}</span></li>`).join('');
+    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(memberName(fixture.homeId))} v ${esc(memberName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, minute)).join('')}`;
+  }
+  function liveInner(live) {
+    return `<div id="live-head">${liveHead(live)}</div>${live.view === 'pitch' ? '<canvas id="match-canvas" class="match-canvas" role="img" aria-label="Live 2D match view"></canvas>' : ''}<div id="live-rest">${liveRest(live)}</div>`;
+  }
+  function animate() {
+    frame = null;
+    const live = liveNow();
+    if (!live || live.view !== 'pitch') return;
+    const canvas = document.getElementById('match-canvas');
+    if (canvas && canvas.clientWidth) {
+      const width = Math.round(canvas.clientWidth * (window.devicePixelRatio || 1));
+      if (canvas.width !== width) { canvas.width = width; canvas.height = Math.round(width * MatchView.ASPECT); }
+      MatchView.draw(canvas, timelineFor(live, watchedFixture(live)), liveClock(live), pitchColours);
+    }
+    frame = requestAnimationFrame(animate);
+  }
+  const topAssists = league => { const totals = new Map(); for (const fixture of league.fixtures) if (fixture.result) for (const [side, goals] of [['homeId', fixture.result.homeScorers], ['awayId', fixture.result.awayScorers]]) for (const goal of goals) if (goal.assistId) { const value = totals.get(goal.assistId) || { name: goal.assistName, managerId: fixture[side], assists: 0 }; value.assists++; totals.set(goal.assistId, value); } return [...totals.values()].sort((a, b) => b.assists - a.assists); };
+  const matchViewControl = () => room.isHost ? `<div class="view-choice"><span class="hint">Match view</span><div class="segmented">${[['classic', 'Classic'], ['pitch', 'Pitch view · beta']].map(([id, label]) => `<button data-do="matchView" data-id="${id}" class="${room.matchView === id ? 'selected' : ''}" ${disabled(!connected || busy)}>${label}</button>`).join('')}</div><span class="hint">${room.matchView === 'pitch' ? 'Players move on a 2D pitch. Matchdays take 75 seconds.' : 'Scores and scorers tick in. Matchdays take 18 seconds.'}</span></div>` : `<p class="hint">Match view: ${room.matchView === 'pitch' ? 'pitch view (beta)' : 'classic'}.</p>`;
   const playerAward = (label, sale) => `<div class="award"><div class="eyebrow">${label}</div><strong>${esc(entry(sale.playerId).player.name)}</strong><p>${esc(memberName(sale.managerId))} · ${money(sale.price)}</p>${showRatings ? `<span class="pill">${sale.rating} rated</span>` : ''}</div>`;
   const awardsReport = awards => `<div class="grid">${playerAward('Bargain of the draft', awards.bargain)}${playerAward('Biggest signing', awards.biggestBuy)}<div class="award wide"><div class="eyebrow">Biggest spender</div><strong>${esc(awards.biggestSpender.name)}</strong><p>${money(awards.biggestSpender.spent)} spent on their XI</p><p class="hint gap-top">Bargains compare each fee with a share of the total spend weighted by player rating.</p></div></div>`;
   function goldenBoot(league) {
@@ -704,7 +1008,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const priciest = sales.slice().sort((a, b) => b.price - a.price)[0], star = sales.map(sale => entry(sale.playerId)).sort((a, b) => rating(b) - rating(a))[0];
       return `<div class="summary-team"><span class="queue-number">${index + 1}</span><div class="grow"><strong>${esc(row.name)}${champions.includes(row) ? ' 🏆' : ''}</strong><small>${row.points} pts · ${row.won}W ${row.drawn}D ${row.lost}L · ${row.gf} scored · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} team rating` : ''}</small><small>Top signing: ${esc(entry(priciest.playerId).player.name)} (${money(priciest.price)})${showRatings ? ` · Best player: ${esc(star.player.name)} (${rating(star)})` : ''}</small></div></div>`;
     }).join('');
-    return `<div class="stack"><section class="panel stack summary-hero"><div class="eyebrow">Full time · Season complete</div><h2>${champions.map(row => esc(row.name)).join(' & ')} ${champions.length > 1 ? 'are joint champions!' : 'are champions!'}</h2><p>${top.points} points from ${top.played} games · ${top.won} wins · ${top.gf} goals</p><div class="summary-stats">${stat('Goals this season', goals, `${(goals / Math.max(1, played.length)).toFixed(1)} per game`)}${biggest ? stat('Biggest win', `${biggest.result.homeGoals} – ${biggest.result.awayGoals}`, `${esc(memberName(biggest.homeId))} v ${esc(memberName(biggest.awayId))}`) : ''}${boot.length ? stat('Golden boot', esc(boot[0].name), `${boot[0].goals} goals · ${esc(memberName(boot[0].managerId))}`) : ''}${stat('Players signed', game.sales.length, `${money(game.sales.reduce((sum, sale) => sum + sale.price, 0))} spent in total`)}</div><div class="actions">${next ? `<button class="primary" data-do="rematch" ${disabled(busy)}>Join the new game · room ${esc(next.code)} →</button>` : `<button class="primary" data-do="rematch" ${disabled(busy)}>Play again · same rules →</button>`}<button class="quiet" data-do="leave">Leave the room</button></div><p class="hint">${next ? 'A fresh lobby with the same rules is waiting for you.' : 'Play again opens a fresh lobby with a new code and the same rules. Everyone else can join it from this screen.'}</p></section><section class="panel stack"><h2>Final table</h2>${standings(rows)}</section><section class="panel stack"><h2>How every team did</h2>${teams}</section>${awardsReport(awards)}</div>`;
+    return `<div class="stack"><section class="panel stack summary-hero"><div class="eyebrow">Full time · Season complete</div><h2>${champions.map(row => esc(row.name)).join(' & ')} ${champions.length > 1 ? 'are joint champions!' : 'are champions!'}</h2><p>${top.points} points from ${top.played} games · ${top.won} wins · ${top.gf} goals</p><div class="summary-stats">${stat('Goals this season', goals, `${(goals / Math.max(1, played.length)).toFixed(1)} per game`)}${biggest ? stat('Biggest win', `${biggest.result.homeGoals} – ${biggest.result.awayGoals}`, `${esc(memberName(biggest.homeId))} v ${esc(memberName(biggest.awayId))}`) : ''}${boot.length ? stat('Golden boot', esc(boot[0].name), `${boot[0].goals} goals · ${esc(memberName(boot[0].managerId))}`) : ''}${topAssists(league).length ? stat('Most assists', esc(topAssists(league)[0].name), `${topAssists(league)[0].assists} assists · ${esc(memberName(topAssists(league)[0].managerId))}`) : ''}${stat('Players signed', game.sales.length, `${money(game.sales.reduce((sum, sale) => sum + sale.price, 0))} spent in total`)}</div><div class="actions">${next ? `<button class="primary" data-do="rematch" ${disabled(busy)}>Join the new game · room ${esc(next.code)} →</button>` : `<button class="primary" data-do="rematch" ${disabled(busy)}>Play again · same rules →</button>`}<button class="quiet" data-do="leave">Leave the room</button></div><p class="hint">${next ? 'A fresh lobby with the same rules is waiting for you.' : 'Play again opens a fresh lobby with a new code and the same rules. Everyone else can join it from this screen.'}</p></section><section class="panel stack"><h2>Final table</h2>${standings(rows)}</section><section class="panel stack"><h2>How every team did</h2>${teams}</section>${awardsReport(awards)}</div>`;
   }
   function leagueScreen() {
     const game = room.game;
@@ -716,7 +1020,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const live = liveNow(), shown = live ? { ...league, round: live.round, fixtures: league.fixtures.map(fixture => fixture.round === live.round ? { ...fixture, result: null } : fixture) } : league;
     const finished = !live && league.round >= count, rows = LeagueCore.table(shown);
     const scorers = goldenBoot(shown);
-    return `<div class="stack">${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.isHost ? `<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button><button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? '<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>' : ''}</section><section class="panel stack"><h2>Fixtures & results</h2>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goals</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
+    return `<div class="stack">${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.isHost ? `${matchViewControl()}<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button><button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>` : ''}</section><section class="panel stack"><h2>Fixtures & results</h2>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goal${scorer.goals === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}${topAssists(shown).length ? `<section class="panel stack"><h2>Most assists</h2>${topAssists(shown).slice(0, 10).map(player => `<div class="sale-row"><strong>${esc(player.name)}</strong><span class="price">${player.assists} assist${player.assists === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
   }
   function render() {
     const focus = document.activeElement, focusId = focus?.id, value = focus && ['INPUT', 'SELECT'].includes(focus.tagName) ? focus.value : null;
@@ -755,7 +1059,9 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     if (minute === shownMinute) return;
     shownMinute = minute;
     const goals = goalsBy(live, minute); if (goals > liveGoals) sound.goal(); liveGoals = goals;
-    const element = document.getElementById('live-matchday'); if (element) element.innerHTML = liveInner(live);
+    const head = document.getElementById('live-head'), rest = document.getElementById('live-rest');
+    if (head && rest) { head.innerHTML = liveHead(live); rest.innerHTML = liveRest(live); }
+    if (live.view === 'pitch' && !frame) frame = requestAnimationFrame(animate);
   }
   function updateTimer() {
     updateLive();
@@ -825,6 +1131,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       return;
     }
     if (type === 'leave') { leaveRoom(); render(); return; }
+    if (type === 'watch') { watchFixture = id; shownMinute = -1; updateLive(); return; }
+    if (type === 'matchView') return action('matchView', { view: id });
     if (type === 'rematch') {
       if (busy) return;
       busy = true; render();
@@ -881,6 +1189,13 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   window.addEventListener('pointercancel', endDrag);
   document.addEventListener('touchmove', event => { if (drag?.ready) event.preventDefault(); }, { passive: false });
   $('#app').addEventListener('click', event => { if (suppressClick) { suppressClick = false; event.stopPropagation(); event.preventDefault(); } }, true);
+  // Play again moves the whole room: when anyone starts the rematch, everyone else joins its lobby.
+  async function followNext() {
+    if (!room?.next || !room.finished || busy) return;
+    busy = true;
+    try { await api('/api/rematch', { roomId: room.id }); connect(); toast('Everyone’s heading to the new lobby.'); }
+    catch (error) { toast(error.message); } finally { busy = false; render(); }
+  }
   function leaveRoom() {
     clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); }
     socket = null; room = null; connected = false; storage.set('room', null); screen = 'home'; tab = 'auction'; liveKey = null; summaryPending = false;
@@ -893,6 +1208,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const results = await Promise.all([api('/api/session', {}), api('/api/options')]); seasons = results[1].seasons;
       const id = storage.get('room');
       if (id) { try { await api(`/api/room/${id}`); } catch (error) { if ([403, 404].includes(error.status)) storage.set('room', null); toast(error.message); } }
+      if (room?.finished && room.next && !code) { await followNext(); return; }
       // An invite link for a different room replaces the saved one, joining its lobby when we know the name.
       if (/^\d{4}$/.test(code || '') && room?.code !== code) {
         if (room) { leaveRoom(); history.replaceState(null, '', `/?code=${code}`); }

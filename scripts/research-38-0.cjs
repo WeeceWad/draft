@@ -54,10 +54,12 @@ const prefix = '"simulateHeadToHead",0,';
 const start = simSource.indexOf(prefix);
 assert(start >= 0);
 const expression = simSource.slice(start + prefix.length, simSource.indexOf(',"simulateSeason"', start));
-const headToHead = vm.runInNewContext(`(${expression})`, {
-  ar: seed => { let state = seed; return () => ((state = 1664525 * state + 1013904223 | 0) >>> 0) / 4294967295; },
-  ay: () => ({ minute: 1 }), aw: () => 0, ak: () => {}, a_: () => 'Goal',
-}, { timeout: 1000 });
+// The module's own seeded random, goal-time, scorer and minute-separation helpers sit together, from ar to a_.
+const helpersStart = simSource.indexOf('function ar('), helpersEnd = simSource.indexOf('let ax=new Set', helpersStart);
+assert(helpersStart >= 0 && helpersEnd > helpersStart);
+const simContext = vm.createContext({ a: { default: { env: {} } } });
+vm.runInContext(simSource.slice(helpersStart, helpersEnd), simContext, { timeout: 1000 });
+const headToHead = vm.runInContext(`(${expression})`, simContext, { timeout: 1000 });
 if (require.main === module) {
   fs.writeFileSync(path.join(root, '../verified-engine.json'), JSON.stringify(evidence, null, 2) + '\n');
   console.log(JSON.stringify(evidence, null, 2));

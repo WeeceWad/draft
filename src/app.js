@@ -247,8 +247,8 @@
     const score = result ? `${result.homeGoals} – ${result.awayGoals}` : 'v';
     const heading = `<div class="fixture-scoreline"><span class="fixture-team" style="--manager-color:${colourFor(home.id)}">${escape(home.name)}<small>HOME</small></span><strong class="fixture-score">${score}</strong><span class="fixture-team away-team" style="--manager-color:${colourFor(away.id)}">${escape(away.name)}<small>AWAY</small></span></div>`;
     if (!result) return `<div class="fixture-card upcoming-fixture">${heading}</div>`;
-    const goals = [...result.homeScorers.map(goal => ({ ...goal, teamId: home.id })), ...result.awayScorers.map(goal => ({ ...goal, teamId: away.id }))].sort((a, b) => a.minute - b.minute);
-    const events = goals.length ? goals.map(goal => `<li><span class="goal-minute">${goal.minute}′</span><span style="--manager-color:${colourFor(goal.teamId)}" class="goal-player">${escape(goal.name)}</span><small>${escape(managerFor(goal.teamId).name)}</small></li>`).join('') : '<li class="no-goals">A clean sheet at both ends.</li>';
+    const goals = [...result.homeScorers.map(goal => ({ ...goal, teamId: home.id })), ...result.awayScorers.map(goal => ({ ...goal, teamId: away.id }))].sort((a, b) => leagueCore.absoluteMinute(a) - leagueCore.absoluteMinute(b));
+    const events = goals.length ? goals.map(goal => `<li><span class="goal-minute">${leagueCore.minuteLabel(goal)}</span><span style="--manager-color:${colourFor(goal.teamId)}" class="goal-player">${escape(goal.name)}</span><small>${escape(managerFor(goal.teamId).name)}</small></li>`).join('') : '<li class="no-goals">A clean sheet at both ends.</li>';
     return `<details class="fixture-card" ${compact ? '' : 'open'}><summary>${heading}<span class="fixture-detail-label">Goals & scorers <span aria-hidden="true">⌄</span></span></summary><ul class="goal-events">${events}</ul></details>`;
   }
   function renderLeague() {

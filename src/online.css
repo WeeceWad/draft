@@ -57,3 +57,24 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .live-clock span{display:block;height:100%;background:var(--green);transition:width .3s linear}
 .live-panel .score{font-size:28px}
 .summary-stat span{display:block;overflow-wrap:anywhere}
+.goals li{flex-wrap:wrap}
+.goal-assist{flex-basis:100%;font-size:11px;color:#7f8ea5}
+.match-canvas{display:block;width:100%;border-radius:12px;background:#16492f;border:1px solid #2f5b45}
+.pitch-scoreboard{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;font-weight:800}
+.pitch-scoreboard .score{font-size:30px;color:var(--text)}
+.pitch-scoreboard .away{text-align:right}
+.kit{display:inline-block;width:12px;height:12px;border-radius:50%;margin:0 6px;vertical-align:middle}
+.home-kit{background:#6cb4ff}.away-kit{background:#ff7b7b}
+.ticker{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px;min-height:110px}
+.ticker li{display:flex;gap:10px;align-items:baseline;color:var(--muted)}
+.ticker li:first-child{color:var(--text)}
+.ticker .goal-event{color:var(--green)!important;font-weight:800}
+.ticker small{color:#7f8ea5}
+.watch-picker{display:flex;gap:8px;flex-wrap:wrap}
+.watch-picker button{flex:1;font-size:12px;min-height:38px;padding:6px 10px}
+.watch-picker .selected,.segmented .selected{background:var(--green);color:#13220d;border-color:var(--green)}
+.view-choice{display:grid;gap:6px}
+.segmented{display:flex;gap:6px}
+.segmented button{flex:1;min-height:40px;font-size:13px}
+@media(max-width:799px){.pitch-scoreboard .score{font-size:24px}.ticker{font-size:12px}}
+.match-canvas{max-width:760px;margin:0 auto}

@@ -43,6 +43,22 @@ for (const homeRating of [40, 60, 80, 95]) for (const awayRating of [40, 60, 80,
   assert.equal(own.homeGoals, expected.homeGoals);
   assert.equal(own.awayGoals, expected.awayGoals);
 }
+// Complete match reports against 38-0's own head-to-head: scores, scorers, minutes and stoppage time.
+let assisted = 0, goalCount = 0;
+for (const formation of ['4-3-3', '3-5-2', '5-3-2']) {
+  const game = completeGame(2, formation, 'season'), [home, away] = game.managers.map(manager => core.team(game, manager));
+  const report = goals => JSON.parse(JSON.stringify(goals.map(goal => [goal.minute, goal.stoppage ?? 0, goal.name ?? goal.scorer])));
+  for (let seed = 0; seed < 300; seed++) {
+    const expected = reference.headToHead(home, away, seed).legs[0], own = core.simulateMatch(home, away, seed);
+    assert.deepEqual(report(own.homeScorers), report(expected.homeScorers), `${formation} seed ${seed} home goals`);
+    assert.deepEqual(report(own.awayScorers), report(expected.awayScorers), `${formation} seed ${seed} away goals`);
+    const goals = [...own.homeScorers, ...own.awayScorers], minutes = goals.map(core.absoluteMinute);
+    assert.equal(new Set(minutes).size, minutes.length, 'No two goals share a minute');
+    for (const goal of goals) { goalCount++; if (goal.assistId) { assisted++; assert.notEqual(goal.assistId, goal.playerId); } }
+  }
+}
+assert(Math.abs(assisted / goalCount - .72) < .04, `About 72% of goals are assisted (${assisted}/${goalCount})`);
+assert.equal(core.minuteLabel({ minute: 90, stoppage: 3 }), '90+3′');
 assert(Math.abs(core.expectedGoals(80, 80, true) - 1.7) < 1e-10);
 assert.equal(core.expectedGoals(80, 80, false), 1.35);
 let strongWins = 0, weakWins = 0, homeGoals = 0, awayGoals = 0;

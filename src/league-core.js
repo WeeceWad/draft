@@ -1,11 +1,13 @@
 (function (scope) {
   const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
   const auction = typeof module !== 'undefined' ? require('./auction-core.js') : scope.AuctionCore;
-  const VERSION = 'touchline-head-to-head-v1';
+  const VERSION = 'touchline-head-to-head-v2';
+  const VERSIONS = ['touchline-head-to-head-v1', VERSION]; // v1 leagues replay with the current engine.
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const units = { GK: 'goalkeeping', CB: 'defence', LB: 'defence', RB: 'defence', CM: 'midfield', CDM: 'midfield', LM: 'midfield', RM: 'midfield', CAM: 'attack', LW: 'attack', RW: 'attack', ST: 'attack' };
   const unitWeights = { attack: .30, midfield: .30, defence: .28, goalkeeping: .12 };
   const scorerWeights = { GK: 0, CB: 1, LB: 2, RB: 2, LWB: 2, RWB: 2, CDM: 3, CM: 8, CAM: 13, LM: 9, RM: 9, LW: 15, RW: 15, ST: 20 };
+  const assistWeights = { GK: 0, LB: 4, CB: 1, RB: 4, LWB: 5, RWB: 5, CDM: 4, CM: 9, CAM: 14, LM: 11, RM: 11, LW: 13, RW: 13, ST: 8 };
   const defensive = new Set(['GK', 'CB', 'LB', 'RB', 'LWB', 'RWB', 'CDM']);
   // Observed browser defaults, independently implemented. See docs/simulation-research.md.
   function naturalRank(position, positions) {
@@ -97,30 +99,64 @@
     return count - 1;
   }
   const expectedGoals = (own, opponent, home) => clamp(1.35 + .05 * (own - opponent) + (home ? .35 : 0), .2, 4.5);
-  function goalEvents(squad, goals, random, tallies) {
+  // Goal times follow 38-0: 2% land in first-half and 4% in second-half stoppage time.
+  function goalTime(value) {
+    if (value >= .96) return { minute: 90, stoppage: Math.min(4, 1 + Math.floor((value - .96) / .04 * 4)) };
+    if (value >= .94) return { minute: 45, stoppage: Math.min(3, 1 + Math.floor((value - .94) / .02 * 3)) };
+    return { minute: Math.min(90, Math.max(1, Math.ceil(90 * Math.pow(value / .94, .82)))) };
+  }
+  const goalOrder = (a, b) => a.minute - b.minute || (a.stoppage ?? 0) - (b.stoppage ?? 0);
+  // Match clock from 0 to 97: 45+3 is 48 and 90+4 is 97.
+  const absoluteMinute = goal => goal.minute === 45 && goal.stoppage ? 45 + goal.stoppage : goal.minute === 90 && goal.stoppage ? 93 + goal.stoppage : goal.minute <= 45 ? goal.minute : goal.minute + 3;
+  const fromAbsolute = value => value <= 45 ? { minute: value } : value <= 48 ? { minute: 45, stoppage: value - 45 } : value <= 93 ? { minute: value - 3 } : { minute: 90, stoppage: value - 93 };
+  const minuteLabel = goal => goal.stoppage ? `${goal.minute}+${goal.stoppage}′` : `${goal.minute}′`;
+  // As in 38-0, no two goals in a match share a minute: clashes move later, within the final whistle.
+  function separate(...lists) {
+    const goals = lists.flat().sort(goalOrder), times = goals.map(absoluteMinute);
+    for (let index = 1; index < times.length; index++) if (times[index] <= times[index - 1]) times[index] = times[index - 1] + 1;
+    for (let index = times.length - 1; index >= 0; index--) { const limit = index === times.length - 1 ? 97 : times[index + 1] - 1; if (times[index] > limit) times[index] = Math.max(1, limit); }
+    goals.forEach((goal, index) => { const time = fromAbsolute(times[index]); goal.minute = time.minute; if (time.stoppage === undefined) delete goal.stoppage; else goal.stoppage = time.stoppage; });
+    for (const list of lists) list.sort(goalOrder);
+  }
+  // 38-0's season engine: 28% of goals are unassisted; otherwise a teammate weighted by role and rating.
+  function pickAssist(squad, scorerId, random) {
+    if (squad.length < 2 || random() > .72) return null;
+    const others = squad.filter(player => player.id !== scorerId);
+    const weights = others.map(player => (assistWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, 3.5));
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    if (!total) return null;
+    let draw = random() * total;
+    for (let index = 0; index < others.length; index++) if ((draw -= weights[index]) <= 0) return others[index];
+    return others.at(-1);
+  }
+  function goalEvents(squad, goals, random, tallies, assistRandom) {
     const result = [];
     for (let index = 0; index < goals; index++) {
-      const minute = clamp(Math.ceil(90 * Math.pow(random(), .82)), 1, 90);
+      const time = goalTime(random());
+      if (!squad.length) { result.push({ ...time, playerId: null, name: 'Goal' }); continue; }
       const weights = squad.map(player => {
         const capped = player.position === 'CDM' || player.positions[0] === 'CDM';
         if (capped && (tallies.get(player.id) || 0) >= 10) return 0;
         return (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4);
       });
-      let draw = random() * weights.reduce((sum, weight) => sum + weight, 0);
+      const total = weights.reduce((sum, weight) => sum + weight, 0);
       let scorer = squad.at(-1);
-      for (let index = 0; index < squad.length; index++) if (weights[index] > 0 && (draw -= weights[index]) <= 0) { scorer = squad[index]; break; }
-      if (!scorer) continue;
+      if (!total) scorer = squad[Math.floor(random() * squad.length)];
+      else { let draw = random() * total; for (let item = 0; item < squad.length; item++) if ((draw -= weights[item]) <= 0) { scorer = squad[item]; break; } }
       tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1);
-      result.push({ minute, playerId: scorer.id, name: scorer.name });
+      const assist = pickAssist(squad, scorer.id, assistRandom);
+      result.push({ ...time, playerId: scorer.id, name: scorer.name, ...(assist ? { assistId: assist.id, assistName: assist.name } : {}) });
     }
-    return result.sort((a, b) => a.minute - b.minute);
+    return result.sort(goalOrder);
   }
   function simulateMatch(home, away, seed, tallies = new Map()) {
-    const random = seeded((seed ^ 0x2c1b3c6d) >>> 0);
+    // The main stream mirrors 38-0's head-to-head exactly; assists use their own stream so they cannot disturb it.
+    const random = seeded((seed ^ 0x2c1b3c6d) >>> 0), assists = seeded((seed ^ 0x51a7c0de) >>> 0);
     const homeXg = expectedGoals(home.overall, away.overall, true), awayXg = expectedGoals(away.overall, home.overall, false);
     const homeGoals = poisson(homeXg, random), awayGoals = poisson(awayXg, random);
-    return { homeGoals, awayGoals, homeXg, awayXg,
-      homeScorers: goalEvents(home.squad, homeGoals, random, tallies), awayScorers: goalEvents(away.squad, awayGoals, random, tallies) };
+    const homeScorers = goalEvents(home.squad, homeGoals, random, tallies, assists), awayScorers = goalEvents(away.squad, awayGoals, random, tallies, assists);
+    separate(homeScorers, awayScorers);
+    return { homeGoals, awayGoals, homeXg, awayXg, homeScorers, awayScorers };
   }
   function create(game, seed = Math.floor(Math.random() * 4294967296)) {
     const check = readiness(game);
@@ -169,7 +205,7 @@
   }
   function restore(saved, game) {
     try {
-      if (!saved || saved.version !== 1 || saved.engineVersion !== VERSION || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
+      if (!saved || saved.version !== 1 || !VERSIONS.includes(saved.engineVersion) || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
       if (JSON.stringify(saved.boards) !== JSON.stringify(game.managers.map(manager => ({ id: manager.id, board: manager.board })))) return null;
       let league = create(game, saved.seed).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
@@ -177,6 +213,6 @@
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);

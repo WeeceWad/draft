@@ -60,7 +60,8 @@ function join(room, uid, displayName, now) {
   const managerId = Array.from({ length: room.capacity }, (_, i) => `manager-${i + 1}`).find(id => !used.has(id));
   return { ...room, members: [...room.members, { uid, managerId, name: name(displayName), ready: false }] };
 }
-const LIVE_MS = 18000; // A live matchday plays 90 minutes in 18 seconds.
+// A live matchday plays the full match clock in 18 seconds, or 75 in the beta pitch view.
+const LIVE_MS = { classic: 18000, pitch: 75000 };
 const isKeeper = (room, playerId) => !!room.game.pool.find(entry => entry.id === playerId)?.player.positions.includes('GK');
 const hasKeeper = (room, managerId) => auction.purchases(room.game, managerId).some(sale => isKeeper(room, sale.playerId));
 // One goalkeeper per XI: keeper owners skip other keepers, and a keeperless manager's last spot is saved for one.
@@ -144,6 +145,7 @@ function apply(room, uid, command, now) {
       if (!active(room).includes(me.managerId)) fail(blocked(room, me.managerId) || 'You are out of this auction.', 409);
       const amount = command.price, bid = leading(room);
       if (!Number.isInteger(amount) || amount < 0) fail('Bid in whole millions.');
+      if (bid && bid[0] === me.managerId) fail('You already have the highest bid. Wait to be outbid.', 409);
       if (bid && amount <= bid[1]) fail('Your bid must beat the current highest bid.', 409);
       // A free signing is only for a manager with no money left once everyone else has backed out.
       if (amount === 0 && !(auction.budget(room.game, me.managerId) === 0 && active(room).length === 1)) fail('Bids start at £1m. You can only take a player for free when you have no money left and everyone else has backed out.');
@@ -198,11 +200,15 @@ function apply(room, uid, command, now) {
       host(room, uid);
       if (!room.league || room.league.round >= leagueCore.roundCount(room.league)) fail('There is no matchday left to play.', 409);
       if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
-      if (command.type === 'playRound') room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS };
+      if (command.type === 'playRound') { const view = room.matchView === 'pitch' ? 'pitch' : 'classic'; room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view }; }
       else room.live = null;
       do { room.league = leagueCore.playRound(room.league).league; } while (command.type === 'finishLeague' && room.league.round < leagueCore.roundCount(room.league));
       break;
     }
+    case 'matchView':
+      host(room, uid);
+      if (!['classic', 'pitch'].includes(command.view)) fail('Choose a match view.');
+      room.matchView = command.view; break;
     case 'ratings':
       host(room, uid);
       room.showRatings = command.show === true; break;
@@ -246,7 +252,7 @@ function view(room, uid) {
     remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
   const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
-    isHost: room.hostUid === uid, me: me.managerId, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null,
+    isHost: room.hostUid === uid, me: me.managerId, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
     keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };
 }
 module.exports = { RoomError, create, pack, unpack, join, apply, view, resolve, leading, finished, linkNext, seasons, players };

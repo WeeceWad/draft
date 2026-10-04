@@ -40,6 +40,10 @@ away = clamp(1.35 + 0.05 × (away strength − home strength),        0.2, 4.5)
 
 Each score is a Poisson draw. Equal sides therefore average 1.70 home goals and 1.35 away goals, without a guaranteed winner. Scorer selection favours attacking positions and higher ratings. A stored seed makes a run repeatable.
 
+Goal times follow the same module: 2% of goals fall in first-half added time (45+1 to 45+3) and 4% in second-half added time (90+1 to 90+4); the rest use `ceil(90 × (r / 0.94)^0.82)`. After both teams' goals are drawn, the module separates them so that no two goals in a match share a minute, moving clashes later within 90+4.
+
+Assists come from 38-0's season engine, because its head-to-head mode records only scorers: 28% of goals are unassisted, otherwise a teammate is chosen by role weight × `(rating / 80)^3.5`. Touchline draws assists from a separate seeded stream, so scores, scorers and minutes stay identical to the head-to-head module.
+
 ## What Touchline implements
 
 Our own implementation in `src/league-core.js` reproduces the observed position rules, effective team rating and head-to-head expected-goal calculation. It reads the auction's chosen overall/season mode and each manager's actual pitch arrangement. Prices affect budgets and awards, not match strength.
@@ -55,6 +59,6 @@ League-specific decisions:
 
 ## Verification and limits
 
-`node scripts/test-league.cjs` checks position-rule parity over 2,744 role combinations, rating parity for all twenty formations in both rating modes, and score parity with the reference head-to-head function for 640 first-leg cases. Ten thousand equal-strength matches verify the expected home/away goal averages; another ten thousand strength-mismatched matches confirm that stronger teams win more often while upsets remain possible. Scheduling and save/restore checks cover every manager count from two to eight.
+`node scripts/test-league.cjs` checks position-rule parity over 2,744 role combinations, rating parity for all twenty formations in both rating modes, score parity with the reference head-to-head function for 640 first-leg cases, and complete match-report parity (scorers, minutes and added time) for 900 matches between drafted XIs, using the module's own goal-time, scorer and minute-separation helpers. Ten thousand equal-strength matches verify the expected home/away goal averages; another ten thousand strength-mismatched matches confirm that stronger teams win more often while upsets remain possible. Scheduling and save/restore checks cover every manager count from two to eight.
 
 This verifies the downloaded browser defaults, not every private server setting or future engine release. No undisclosed chemistry, pace, shooting, injuries, fitness or tactical attributes are invented. The data already present in our game contains overall ratings, season ratings and ordered positions, which are sufficient for this verified head-to-head model. Public source assets are research references; the HTML bundles our independently written league module.
