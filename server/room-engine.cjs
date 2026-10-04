@@ -212,6 +212,15 @@ function apply(room, uid, command, now) {
     case 'ratings':
       host(room, uid);
       room.showRatings = command.show === true; break;
+    case 'settings': {
+      host(room, uid);
+      if (room.status !== 'lobby') fail('The rules are locked once the auction starts.', 409);
+      const capacity = command.capacity;
+      if (Number.isInteger(capacity) && capacity < room.members.length) fail(`${room.members.length} managers have joined. Remove someone before lowering the number.`);
+      room.config = settings(command.config || {}, capacity); room.capacity = capacity;
+      // New rules need everyone to agree again.
+      room.members.forEach(member => { member.ready = false; }); break;
+    }
     case 'kick':
       host(room, uid);
       if (room.status !== 'lobby' || command.managerId === me.managerId) fail('Only another manager in the lobby can be removed.');

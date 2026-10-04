@@ -11,7 +11,19 @@ function lobby(count = 3) {
   return room;
 }
 function command(room, uid, type, details = {}) { return engine.apply(room, uid, { type, requestId: String(++sequence), ...details }, time).room; }
+// The host can change every rule in the lobby; new rules ask everyone to ready up again.
+{
+  let open = lobby();
+  assert.throws(() => command(open, 'b', 'settings', { capacity: 3, config }), /Only the host/);
+  assert.throws(() => command(open, 'a', 'settings', { capacity: 2, config }), /Remove someone/);
+  assert.throws(() => command(open, 'a', 'settings', { capacity: 3, config: { ...config, ratingMin: 95 } }), /Widen/);
+  open = command(open, 'a', 'settings', { capacity: 4, config: { ...config, formation: '3-5-2', mode: 'season', seasonFrom: '2000/01', ratingMin: 60 } });
+  assert.equal(open.capacity, 4); assert.deepEqual([open.config.formation, open.config.mode, open.config.seasonFrom, open.config.ratingMin], ['3-5-2', 'season', '2000/01', 60]);
+  assert(open.members.every(member => !member.ready)); assert.equal(engine.view(open, 'b').capacity, 4);
+  assert.throws(() => command(open, 'a', 'start'), /Wait for every manager/);
+}
 let room = command(lobby(), 'a', 'start');
+assert.throws(() => command(room, 'a', 'settings', { capacity: 3, config }), /locked/);
 assert.equal(room.game.pool.length, 33);
 assert.equal(room.game.pool.filter(entry => entry.player.positions.includes('GK')).length, 3);
 assert.throws(() => command(room, 'b', 'reveal'), /Only the host/);

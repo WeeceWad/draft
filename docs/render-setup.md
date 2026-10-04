@@ -36,7 +36,8 @@ The hosted game is at `/`, and the original shared-device game is at `/offline.h
 
 ## Online auction rules
 
-- Host selects 2–8 managers, formation, peak/season rating mode, season range and rating range. Settings lock when the room is created.
+- Host selects 2–8 managers, formation, peak/season rating mode, season range and rating range. The host can change any of these in the lobby under **Room rules**; saving new rules asks everyone to ready up again. The rules lock when the auction starts.
+- Squad lists are grouped by main position: goalkeeper, defence, midfield, attack.
 - The server picks 11 unique players per manager, using the existing balanced pool logic. Future player identities and the selected remaining pool never appear in client snapshots.
 - The host spins the mystery wheel to reveal each player. Bidding opens after the reveal animation.
 - The first accepted bid starts a 60-second countdown. Every subsequent accepted bid adds 10 seconds to the current deadline, including a higher bid by the leader. Bids must exceed the highest active bid and stay within the bidder's budget. Bids are whole millions from £1m. A £0 bid is only accepted from a manager with no money left once everyone else has backed out. After each new bid, everyone's bid box moves to £1m above it.

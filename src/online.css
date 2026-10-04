@@ -78,3 +78,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .segmented button{flex:1;min-height:40px;font-size:13px}
 @media(max-width:799px){.pitch-scoreboard .score{font-size:24px}.ticker{font-size:12px}}
 .match-canvas{max-width:760px;margin:0 auto}
+.squad-group{margin-top:6px}
+.squad-group:first-child{margin-top:0}
+.rules-form{border-top:1px solid var(--line);padding-top:16px}
+.rules-form .grid{grid-template-columns:1fr}
+.rules-form h3{margin:0}

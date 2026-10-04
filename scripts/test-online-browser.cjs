@@ -18,6 +18,13 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     const code = await host.locator('.big-code').innerText();
     assert(await host.locator('[data-do=start]').isDisabled());
     for (const [page, name] of [[guest, 'Blair'], [third, 'CaseysLegendaryXI1234567']]) { await page.locator('#join-name').fill(name); await page.locator('#join-code').fill(code); await page.locator('#join-form .primary').click(); await page.locator('.big-code').waitFor(); await page.locator('[data-do=ready]').click(); }
+    // The host edits the rules in the lobby; guests see them and ready up again.
+    await host.locator('#rules-form #formation').selectOption('4-4-2'); await host.locator('#rules-form .primary').click();
+    await guest.waitForFunction(() => document.querySelector('.rules')?.textContent.includes('4-4-2'));
+    assert.match(await guest.locator('[data-do=ready]').innerText(), /I’m ready/);
+    await host.locator('#rules-form #formation').selectOption('4-1-2-1-2 (diamond)'); await host.locator('#rules-form .primary').click();
+    await guest.waitForFunction(() => document.querySelector('.rules')?.textContent.includes('diamond'));
+    for (const page of [guest, third]) await page.locator('[data-do=ready]').click();
     await host.locator('[data-do=ready]').click(); await host.locator('[data-do=start]').click();
     await guest.locator('nav [data-do=tab][data-id=auction]').waitFor();
     assert.equal(await host.locator('#season-from').count(), 0);
@@ -39,7 +46,7 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     await guest.waitForFunction(() => document.querySelector('.player-card')?.textContent.includes('Blair signed them for'));
     assert.equal(await guest.locator('.budget').innerText(), '£990m');
     await guest.reload(); await guest.locator('nav [data-do=tab][data-id=teams]').click();
-    assert.equal(await guest.locator('.squad-player').count(), 1);
+    assert.equal(await guest.locator('.squad-player').count(), 1); assert.equal(await guest.locator('.squad-group').count(), 1);
     await guest.locator('.slot').first().click(); await guest.locator('.pick-prompt').waitFor(); await guest.locator('.squad-player').click();
     await guest.waitForFunction(() => document.querySelector('.slot .paid')?.textContent === '£10m');
     await guest.locator('[data-do=clearBoard]').click();
