@@ -60,7 +60,21 @@ function join(room, uid, displayName, now) {
   const managerId = Array.from({ length: room.capacity }, (_, i) => `manager-${i + 1}`).find(id => !used.has(id));
   return { ...room, members: [...room.members, { uid, managerId, name: name(displayName), ready: false }] };
 }
-function eligible(room) { return room.game.managers.filter(manager => auction.purchases(room.game, manager.id).length < 11).map(manager => manager.id); }
+const LIVE_MS = 18000; // A live matchday plays 90 minutes in 18 seconds.
+const isKeeper = (room, playerId) => !!room.game.pool.find(entry => entry.id === playerId)?.player.positions.includes('GK');
+const hasKeeper = (room, managerId) => auction.purchases(room.game, managerId).some(sale => isKeeper(room, sale.playerId));
+// One goalkeeper per XI: keeper owners skip other keepers, and a keeperless manager's last spot is saved for one.
+function canBuy(room, managerId, playerId) {
+  const count = auction.purchases(room.game, managerId).length;
+  if (count >= 11) return false;
+  return isKeeper(room, playerId) ? !hasKeeper(room, managerId) : count < 10 || hasKeeper(room, managerId);
+}
+function eligible(room) { return room.game.managers.filter(manager => canBuy(room, manager.id, room.round.playerId)).map(manager => manager.id); }
+function blocked(room, managerId) {
+  if (auction.purchases(room.game, managerId).length >= 11) return 'Your XI is full.';
+  if (canBuy(room, managerId, room.round.playerId)) return null;
+  return isKeeper(room, room.round.playerId) ? 'You already have a goalkeeper.' : 'Your last spot is saved for a goalkeeper.';
+}
 function active(room) { return eligible(room).filter(id => !room.round.withdrawn.includes(id)); }
 function leading(room) {
   return Object.entries(room.round.offers).filter(([id]) => active(room).includes(id)).sort((a, b) => b[1] - a[1])[0] || null;
@@ -127,10 +141,12 @@ function apply(room, uid, command, now) {
     }
     case 'bid': {
       if (now < room.round.opensAt) fail('Wait for the player to be revealed.', 409);
-      if (!active(room).includes(me.managerId)) fail('You are out of this auction or your XI is full.', 409);
+      if (!active(room).includes(me.managerId)) fail(blocked(room, me.managerId) || 'You are out of this auction.', 409);
       const amount = command.price, bid = leading(room);
       if (!Number.isInteger(amount) || amount < 0) fail('Bid in whole millions.');
       if (bid && amount <= bid[1]) fail('Your bid must beat the current highest bid.', 409);
+      // A free signing is only for a manager with no money left once everyone else has backed out.
+      if (amount === 0 && !(auction.budget(room.game, me.managerId) === 0 && active(room).length === 1)) fail('Bids start at £1m. You can only take a player for free when you have no money left and everyone else has backed out.');
       if (amount > auction.budget(room.game, me.managerId)) fail('That bid exceeds your remaining budget.');
       room.round.offers[me.managerId] = amount;
       room.round.bids = [...room.round.bids, { managerId: me.managerId, price: amount, at: now }].slice(-12);
@@ -140,8 +156,8 @@ function apply(room, uid, command, now) {
     }
     case 'withdraw':
       if (now < room.round.opensAt) fail('Wait for the player to be revealed.', 409);
-      if (!active(room).includes(me.managerId)) fail('You have already backed out or your XI is full.', 409);
-      if (room.round.offers[me.managerId] !== undefined) fail('You have bid on this player, so you are locked in.', 409);
+      if (!active(room).includes(me.managerId)) fail(blocked(room, me.managerId) || 'You have already backed out.', 409);
+      if (leading(room)?.[0] === me.managerId) fail('You have the highest bid, so you are locked in.', 409);
       room.round.withdrawn.push(me.managerId); resolve(room, now); break;
     case 'skip':
       host(room, uid);
@@ -181,9 +197,15 @@ function apply(room, uid, command, now) {
     case 'finishLeague': {
       host(room, uid);
       if (!room.league || room.league.round >= leagueCore.roundCount(room.league)) fail('There is no matchday left to play.', 409);
+      if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
+      if (command.type === 'playRound') room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS };
+      else room.live = null;
       do { room.league = leagueCore.playRound(room.league).league; } while (command.type === 'finishLeague' && room.league.round < leagueCore.roundCount(room.league));
       break;
     }
+    case 'ratings':
+      host(room, uid);
+      room.showRatings = command.show === true; break;
     case 'kick':
       host(room, uid);
       if (room.status !== 'lobby' || command.managerId === me.managerId) fail('Only another manager in the lobby can be removed.');
@@ -199,13 +221,21 @@ function apply(room, uid, command, now) {
   if (command.requestId) room.seen = [...room.seen, `${uid}:${command.requestId}`].slice(-100);
   return { room, changed: true };
 }
+const finished = room => !!room.league && room.league.round >= leagueCore.roundCount(room.league);
+// Point a finished room at its rematch. The first rematch wins; later callers join it.
+function linkNext(room, uid, next) {
+  member(room, uid);
+  if (!finished(room)) fail('Finish the league before starting a new game.', 409);
+  if (room.next) return { room, changed: false };
+  room.next = next; return { room, changed: true };
+}
 function entryView(entry) {
   return { id: entry.id, player: { id: entry.id, name: entry.player.name, positions: entry.player.positions, nationality: entry.player.nationality, peakRating: entry.player.peakRating },
     season: entry.season, club: clubMap.get(entry.season.clubId) };
 }
 function view(room, uid) {
   const me = member(room, uid);
-  const round = room.round && { ...room.round, leader: leading(room) ? { managerId: leading(room)[0], price: leading(room)[1] } : null, active: active(room), bidders: Object.keys(room.round.offers) };
+  const round = room.round && { ...room.round, leader: leading(room) ? { managerId: leading(room)[0], price: leading(room)[1] } : null, active: active(room) };
   if (round) delete round.offers;
   const skipped = room.game?.skipped || [];
   const known = room.game ? new Set([...room.game.sales.map(sale => sale.playerId), ...skipped, ...(room.round ? [room.round.playerId] : [])]) : new Set();
@@ -216,6 +246,7 @@ function view(room, uid) {
     remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
   const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
-    isHost: room.hostUid === uid, me: me.managerId, members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };
+    isHost: room.hostUid === uid, me: me.managerId, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null,
+    keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };
 }
-module.exports = { RoomError, create, pack, unpack, join, apply, view, resolve, leading, seasons, players };
+module.exports = { RoomError, create, pack, unpack, join, apply, view, resolve, leading, finished, linkNext, seasons, players };

@@ -29,6 +29,35 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .drop-over{outline:3px solid var(--green)!important;outline-offset:2px}
 .squad-list.drop-over{border-radius:12px}
 @media(max-width:799px){.top #sound-toggle{padding:5px 8px;min-height:38px;font-size:11px}}
+.player-symbol{font-size:34px;letter-spacing:-1px;line-height:1;overflow:hidden}
+.summary-hero{background:radial-gradient(ellipse at 50% 0,#2b4239,transparent 70%),var(--panel)}
+.summary-hero h2{font-size:clamp(24px,5vw,36px);overflow-wrap:anywhere}
+.summary-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.summary-stat{background:#0e1520;border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
+.summary-stat small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.summary-stat strong{display:block;font-size:20px;margin:2px 0;overflow-wrap:anywhere}
+.summary-stat span{font-size:12px;color:var(--muted)}
+.summary-team{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.summary-team .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.summary-team small{display:block;color:var(--muted);font-size:12px}
+@media(max-width:799px){.player-symbol{font-size:24px}.tabs{gap:2px;padding-left:4px;padding-right:4px}.tabs button{font-size:11px;padding:10px 2px}.summary-stats{grid-template-columns:1fr 1fr}}
+[hidden]{display:none!important}
+.fixture-line{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}
+.fixture-line .team-name{min-width:0;overflow-wrap:anywhere}
+.fixture-line .away{text-align:right}
+.goal-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+.goals{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.goals li{display:flex;gap:6px;align-items:baseline}
+.goals.away li{justify-content:flex-end;text-align:right}
+.goal-name{overflow-wrap:anywhere;min-width:0}
+.goal-minute{color:var(--green);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.live-panel{border-color:#47633c;background:radial-gradient(ellipse at 50% 0,#2b4239,transparent 70%),var(--panel)}
+.live-label{color:var(--red)}
+.live-minute{font-size:40px;font-variant-numeric:tabular-nums;color:var(--green)}
+.live-clock{height:6px;border-radius:3px;background:#0e1520;overflow:hidden}
+.live-clock span{display:block;height:100%;background:var(--green);transition:width .3s linear}
+.live-panel .score{font-size:28px}
+.summary-stat span{display:block;overflow-wrap:anywhere}
 </style></head>
 <body><header class="top"><a class="brand" href="/">◈ <span>TOUCHLINE<small>LIVE AUCTION</small></span></a><div id="connection" class="connection">Connecting…</div><button id="sound-toggle" class="quiet" hidden>Sound on</button><button id="rating-toggle" class="quiet" hidden>Hide ratings</button></header><main id="app"><div class="panel">Connecting to Touchline…</div></main><div id="toast" role="status" aria-live="polite"></div><script>(function (scope) {
   const row = (positions, y, xs) => positions.map((position, i) => ({ position, x: xs[i], y }));
@@ -489,6 +518,13 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const base = mine ? 880 : 660;
       tone(base, 0, .1, { type: 'triangle', volume: .16 }); tone(base * 1.5, .07, .16, { type: 'triangle', volume: .14 });
     },
+    goal() {
+      [392, 523, 659, 784, 1047].forEach((frequency, index) => tone(frequency, index * .07, .35, { type: 'triangle', volume: .12 }));
+    },
+    // Two short referee blasts for kick-off and full time.
+    whistle() {
+      [0, .3].forEach(start => tone(2900, start, .2, { type: 'square', volume: .035, slide: 2700 }));
+    },
     sold(mine = false) {
       [523, 659, 784, mine ? 1047 : 988].forEach((frequency, index) => tone(frequency, index * .09, .28, { type: 'triangle', volume: .13 }));
     },
@@ -505,8 +541,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, bidText = '', offset = 0, seasons = [], revealDrawn = null;
-  let showRatings = storage.get('ratings') !== 'hide';
+  let room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
   const memberName = id => room?.members.find(member => member.managerId === id)?.name || 'Manager';
@@ -541,11 +577,23 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     room = next; storage.set('room', room.id);
     if (newRound) revealDrawn = null;
     // Keep the bid box one million above the highest bid, unless a higher bid is already typed.
-    if (leaderMoved) { const min = next.round?.leader ? next.round.leader.price + 1 : 1; if (newRound || !(Number(bidText) >= min)) bidText = String(min); }
+    showRatings = next.showRatings !== false;
+    if (leaderMoved) { const min = minBid(next); if (newRound || !(Number(bidText) >= min)) bidText = String(min); }
     if (previous) cue(previous.round, next.round);
-    if (first) { teamId = room.me; selectedSlot = null; tab = room.status === 'complete' ? 'league' : 'auction'; }
+    if (first) { teamId = room.me; selectedSlot = null; tab = room.status === 'complete' ? 'league' : 'auction'; history.replaceState(null, '', `/?code=${room.code}`); }
     if (room.status === 'complete' && newRound) tab = 'league';
+    if (previous && next.league && (!previous.league || previous.league.round !== next.league.round)) tab = 'league';
+    if (room.finished && (first || !previous?.finished)) { if (liveNow()) { summaryPending = true; tab = 'league'; } else tab = 'summary'; }
     render();
+  }
+  // Bids start at £1m. £0 only works for a manager with no money left, once everyone else is out.
+  function minBid(state) {
+    if (state?.round?.leader) return state.round.leader.price + 1;
+    return state?.game && AuctionCore.budget(state.game, state.me) === 0 ? 0 : 1;
+  }
+  function blockedReason(managerId, keeper) {
+    if (AuctionCore.purchases(room.game, managerId).length >= 11) return 'Your XI is full';
+    return keeper ? 'You already have a goalkeeper' : 'Your last spot is saved for a goalkeeper';
   }
   function cue(before, after) {
     if (!after) return;
@@ -576,7 +624,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     catch (error) { toast(error.message); }
     finally { busy = false; render(); }
   }
-  function rules(config) { return `<div class="rules stack"><div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>Formation</span><strong>${esc(config.formation)}</strong></div><p>£1bn each · 11 players each · bids in whole millions · 60 seconds from the first bid · +10 seconds per new bid · once you bid, you’re locked in. Settings lock when the room is created.</p></div>`; }
+  function rules(config) { return `<div class="rules stack"><div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>Formation</span><strong>${esc(config.formation)}</strong></div><p>£1bn each · 11 players each · bids from £1m in whole millions · 60 seconds from the first bid · +10 seconds per new bid · the highest bidder is locked in. Settings lock when the room is created.</p></div>`; }
   function home() {
     const code = new URLSearchParams(location.search).get('code') || '';
     return `<div class="hero"><div class="eyebrow">A room. A budget. Your best XI.</div><h1 class="gap-top">Build your team.<br>Beat your mates.</h1><p>A live football auction, straight from your phone. Draft legends, outbid your friends, then play a league together.</p></div><div class="grid home-panels"><section class="panel stack"><div class="eyebrow">You set the rules</div><h2>Host an auction</h2><p>Choose your player pool, share a four-digit code and get everyone ready.</p><button class="primary" data-do="setup">Create room →</button></section><form id="join-form" class="panel stack"><div class="eyebrow">Got an invite?</div><h2>Join your friends</h2><div class="field"><label for="join-name">Your manager name</label><input id="join-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="join-code">Room code</label><input class="code-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required value="${esc(/^\d{4}$/.test(code) ? code : '')}" placeholder="0000" autocomplete="off"></div><button class="primary" ${disabled(busy)}>Join room →</button></form><p class="wide hint">Each manager needs their own browser or device. Already playing? Use the same browser to rejoin with your saved team. <a href="/offline.html">Play the local version</a>.</p></div>`;
@@ -589,14 +637,15 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return `<div class="room-head row"><div><div class="eyebrow">The dressing room</div><h1 class="gap-top">Waiting for your managers</h1></div><span class="pill">${room.members.length}/${room.capacity} joined</span></div><div class="grid lobby-grid"><section class="panel stack"><h2>Share your room code</h2><div class="big-code">${room.code}</div><div class="actions"><button data-do="copy-code">Copy code</button><button data-do="share">Share invite</button></div><p class="hint">Open this game on another device and enter the code. The room lasts 24 hours.</p>${rules(room.config)}</section><section class="panel stack"><h2>Your managers</h2><div>${room.members.map(member => `<div class="member"><div class="avatar">${esc(member.name.slice(0, 1).toUpperCase())}</div><div class="grow"><strong>${esc(member.name)}${member.managerId === room.me ? ' (you)' : ''}</strong><small>${member.isHost ? 'Host · ' : ''}${member.ready ? 'Ready to draft' : 'Not ready yet'}</small></div>${room.isHost && member.managerId !== room.me ? `<button class="quiet danger" data-do="kick" data-id="${member.managerId}" aria-label="Remove ${esc(member.name)}">×</button>` : `<span class="pill ${member.ready ? 'green' : ''}">${member.ready ? 'Ready' : 'Waiting'}</span>`}</div>`).join('')}</div><button class="${me.ready ? 'quiet' : 'primary'}" data-do="ready" ${disabled(!connected || busy)}>${me.ready ? 'Not ready' : 'I’m ready'}</button>${room.isHost ? `<button class="primary" data-do="start" ${disabled(!allReady || !connected || busy)}>Start the auction →</button><p class="hint">Everyone must join and be ready before you start.</p>` : '<p class="hint">Your host starts once everyone is ready.</p>'}</section></div>${roomFooter()}`;
   }
   function roomFooter() { return `<details class="gap-top"><summary class="hint">Room options</summary><div class="footer-actions"><button class="quiet" data-do="leave">Return to home</button>${room.isHost ? `<select id="next-host" aria-label="Choose next host">${room.members.filter(member => member.managerId !== room.me).map(member => `<option value="${member.managerId}">${esc(member.name)}</option>`).join('')}</select><button class="quiet" data-do="transferHost" ${disabled(!connected || busy || room.members.length < 2)}>Hand over host</button>` : ''}</div><p class="hint gap-top">Leaving this page keeps your place in the room. Closing the browser does not withdraw a live bid. Hand over hosting before the host leaves.</p></details>`; }
-  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${[['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League']].map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
+  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${[['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League'], ...(room.finished ? [['summary', '★ Summary']] : [])].map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
   function auctionScreen() {
     const round = room.round, player = round && entry(round.playerId), spinning = round?.status === 'open' && clock() < round.opensAt;
     const open = round?.status === 'open', out = round?.withdrawn.includes(room.me), leader = round?.leader;
-    const allowed = open && !spinning && !out && !myFull() && connected && !busy && !(round.deadline && clock() >= round.deadline);
-    const min = leader ? leader.price + 1 : 0, locked = !!round?.bidders?.includes(room.me);
+    const keeper = !!player?.player.positions.includes('GK'), blocked = open && !out && !round.active.includes(room.me) ? blockedReason(room.me, keeper) : null;
+    const allowed = open && !spinning && !out && !blocked && connected && !busy && !(round.deadline && clock() >= round.deadline);
+    const min = minBid(room), locked = open && leader?.managerId === room.me, broke = myBudget() === 0 && !myFull();
     const ended = round && !open;
-    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol line-${line(player.player.positions[0])}">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span>${positions(player.player.positions)}${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="numeric" type="number" min="${min}" max="${myBudget()}" step="1" placeholder="${min}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10, 50].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>Place bid${leader?.managerId === room.me ? ' · you’re leading' : ''}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed || locked)}>${out ? 'You’re out for this player' : myFull() ? 'Your XI is full' : locked ? 'Locked in · you’ve bid on this player' : 'Back out for this player'}</button><p class="hint">Bids are whole millions. First bid starts 60 seconds; every later bid adds 10 seconds. Once you bid, you’re locked in until this player is sold. Back out before bidding if you don’t want them.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
+    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol line-${line(player.player.positions[0])}">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span>${positions(player.player.positions)}${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId), cannot = !full && !withdrew && open && !round.active.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew || cannot ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : cannot ? (keeper ? 'Has a GK' : 'Needs a GK') : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="numeric" type="number" min="${min}" max="${myBudget()}" step="1" placeholder="${min}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10, 50].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>Place bid${leader?.managerId === room.me ? ' · you’re leading' : ''}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed || locked)}>${out ? 'You’re out for this player' : blocked ? blocked : locked ? 'Locked in · you’re the highest bidder' : 'Back out for this player'}</button>${broke && !out ? '<p class="hint">You’re out of money. If everyone else backs out, bid £0 to take this player for free.</p>' : ''}<p class="hint">Bids are whole millions, from £1m. First bid starts 60 seconds; every later bid adds 10 seconds. The highest bidder is locked in. If you’re outbid, you can back out.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
   }
   function skippedPlayers() {
     const queued = room.game.skipped || [];
@@ -619,24 +668,63 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return `<div class="team-picker">${room.game.managers.map(manager => `<button data-do="team" data-id="${manager.id}" class="${teamId === manager.id ? 'selected' : ''}">${esc(manager.name)}${manager.id === room.me ? ' · You' : ''}</button>`).join('')}</div><div class="team-layout"><section class="panel stack"><div class="row"><h2>${esc(manager.name)}’s XI</h2><span class="pill">${esc(room.game.config.formation)}</span></div>${showRatings ? `<div class="stat-grid">${[['Attack', team.attack, 'att'], ['Midfield', team.midfield, 'mid'], ['Defence', team.defence, 'def'], ['GK', team.goalkeeping, 'gk']].map(([label, value, key]) => `<div class="stat line-${key}"><strong>${value || '—'}</strong>${label}</div>`).join('')}</div>` : ''}<div class="pitch"><div class="circle"></div><div class="box top-box"></div><div class="box bottom-box"></div>${slots.map((slot, index) => { const player = entry(manager.board[index]); return `<button class="slot line-${line(slot.position)} ${player ? 'filled' : ''} ${player && LeagueCore.fitMultiplier(slot.position, player.player.positions) === .93 ? 'misplaced' : ''} ${index === selectedSlot ? 'selected' : ''}" style="left:${slot.x}%;top:${slot.y}%" data-do="slot" data-id="${index}" data-drop-slot="${index}"${draggable(player)} ${disabled(!editable || !connected || busy)} aria-pressed="${index === selectedSlot}" aria-label="${esc(slot.position)}: ${esc(player?.player.name || 'Empty slot')}"><span class="role">${slot.position}</span><span class="name">${player ? esc(player.player.name) : '+'}</span>${player ? `<span class="paid">${money(paid(player.id))}</span>${showRatings ? `<span class="small-rating"> · ${rating(player)}</span>` : ''}` : ''}</button>`; }).join('')}</div>${legend}<p class="hint">${help} Dashed orange outlines show an unfamiliar position.</p></section><section class="panel stack"><div class="row"><h2>The squad</h2><span class="pill">${sales.length}/11 · ${money(AuctionCore.budget(room.game, teamId))} left</span></div>${editable ? `<div class="actions"><button data-do="autoPlace" ${disabled(!connected || busy || !sales.length)}>Arrange automatically</button><button class="quiet danger" data-do="clearBoard" ${disabled(!connected || busy || !placedCount)}>Clear the pitch</button>${targetPlayer ? `<button class="quiet" data-do="unplace" data-id="${esc(targetPlayer.id)}" ${disabled(!connected || busy)}>Take ${esc(targetPlayer.player.name)} off</button>` : ''}</div>` : ''}${target ? `<p class="pick-prompt">Choose a player for <span class="pos pos-${line(target.position)}">${target.position}</span></p>` : ''}<div class="squad-list ${target ? 'picking' : ''}"${editable ? ' data-drop-squad' : ''}>${sales.map(sale => { const player = entry(sale.playerId), at = manager.board.indexOf(player.id); return `<button class="squad-player ${at >= 0 ? 'placed' : ''}" data-do="select-player" data-id="${esc(player.id)}"${draggable(player)} ${disabled(!editable)}><span><strong>${esc(player.player.name)}</strong><small>${positions(player.player.positions)} ${esc(player.season.season)}${at >= 0 ? ` · On pitch at ${slots[at].position}` : ''}</small></span><span>${money(sale.price)}${showRatings ? `<small> · ${rating(player)}</small>` : ''}</span></button>`; }).join('') || '<div class="empty">Your first signing is waiting in the auction.</div>'}</div>${editable && placedCount ? '<p class="hint">Drag a player from the pitch back to this list to take them off.</p>' : ''}${showRatings ? `<p class="hint">Team overall: ${team.overall || '—'}. Positions affect team strength in the league.</p>` : ''}</section></div>`;
   }
   function transfersScreen() { return `<section class="panel stack"><div class="row"><h2>Transfer board</h2><span class="pill">${room.game.sales.length} signings</span></div><p>Every deal, ordered from the biggest fee to the smallest.</p><div>${room.game.sales.slice().sort((a, b) => b.price - a.price).map((sale, i) => { const player = entry(sale.playerId); return `<div class="sale-row"><span class="muted">${i + 1}</span><div style="flex:1"><strong>${esc(player.player.name)} ${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</strong><small>${positions(player.player.positions)} ${esc(memberName(sale.managerId))} · ${esc(player.season.season)}</small></div><span class="price">${money(sale.price)}</span><button class="quiet" data-do="team" data-id="${sale.managerId}" aria-label="View ${esc(memberName(sale.managerId))}’s team">XI</button></div>`; }).join('') || '<div class="empty">No deals yet. The auction is where it all starts.</div>'}</div></section>`; }
+  const liveNow = () => room?.live && clock() < room.live.endsAt ? room.live : null;
+  const liveMinute = live => Math.max(0, Math.min(90, Math.floor((clock() - live.startsAt) / (live.endsAt - live.startsAt) * 90)));
+  const liveFixtures = live => room.league.fixtures.filter(fixture => fixture.round === live.round);
+  const goalsBy = (live, minute) => liveFixtures(live).reduce((sum, fixture) => sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => goal.minute <= minute).length, 0);
+  // Scorers sit under their own team, one per line, with the minute beside them.
+  function fixtureCard(fixture, minute = 90) {
+    const result = fixture.result, upTo = goals => (goals || []).filter(goal => goal.minute <= minute);
+    const home = upTo(result?.homeScorers), away = upTo(result?.awayScorers);
+    const list = goals => goals.map(goal => `<li><span class="goal-name">${esc(goal.name)}</span><span class="goal-minute">${goal.minute}′</span></li>`).join('');
+    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${esc(memberName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(memberName(fixture.awayId))}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}</div>`;
+  }
+  function liveInner(live) {
+    const minute = liveMinute(live);
+    return `<div class="row"><div><div class="eyebrow live-label">● Live · Matchday ${live.round + 1}</div><h2 class="gap-top live-minute">${minute < 90 ? `${minute}′` : 'Full time'}</h2></div><span class="pill">${minute < 45 ? 'First half' : minute < 90 ? 'Second half' : 'Full time'}</span></div><div class="live-clock"><span style="width:${minute / 90 * 100}%"></span></div>${liveFixtures(live).map(fixture => fixtureCard(fixture, minute)).join('')}`;
+  }
+  const playerAward = (label, sale) => `<div class="award"><div class="eyebrow">${label}</div><strong>${esc(entry(sale.playerId).player.name)}</strong><p>${esc(memberName(sale.managerId))} · ${money(sale.price)}</p>${showRatings ? `<span class="pill">${sale.rating} rated</span>` : ''}</div>`;
+  const awardsReport = awards => `<div class="grid">${playerAward('Bargain of the draft', awards.bargain)}${playerAward('Biggest signing', awards.biggestBuy)}<div class="award wide"><div class="eyebrow">Biggest spender</div><strong>${esc(awards.biggestSpender.name)}</strong><p>${money(awards.biggestSpender.spent)} spent on their XI</p><p class="hint gap-top">Bargains compare each fee with a share of the total spend weighted by player rating.</p></div></div>`;
+  function goldenBoot(league) {
+    const scorers = new Map();
+    for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) { const value = scorers.get(scorer.playerId) || { name: scorer.name, managerId: fixture.result.homeScorers.includes(scorer) ? fixture.homeId : fixture.awayId, goals: 0 }; value.goals++; scorers.set(scorer.playerId, value); }
+    return [...scorers.values()].sort((a, b) => b.goals - a.goals);
+  }
+  const standings = rows => `<div class="scroll-table"><table><thead><tr><th>#</th><th>Manager</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>${rows.map((row, i) => `<tr><td>${i + 1}</td><td>${esc(row.name)}</td>${['played', 'won', 'drawn', 'lost', 'gf', 'ga', 'gd'].map(key => `<td>${row[key]}</td>`).join('')}<td class="points">${row.points}</td></tr>`).join('')}</tbody></table></div>`;
+  function summaryScreen() {
+    const game = room.game, league = room.league, rows = LeagueCore.table(league), awards = LeagueCore.awards(game), top = rows[0];
+    const champions = rows.filter(row => row.points === top.points && row.gd === top.gd && row.gf === top.gf);
+    const played = league.fixtures.filter(fixture => fixture.result), goals = played.reduce((sum, fixture) => sum + fixture.result.homeGoals + fixture.result.awayGoals, 0);
+    const margin = fixture => Math.abs(fixture.result.homeGoals - fixture.result.awayGoals), total = fixture => fixture.result.homeGoals + fixture.result.awayGoals;
+    const biggest = played.slice().sort((a, b) => margin(b) - margin(a) || total(b) - total(a))[0];
+    const boot = goldenBoot(league), next = room.next;
+    const stat = (label, value, note) => `<div class="summary-stat"><small>${label}</small><strong>${value}</strong>${note ? `<span>${note}</span>` : ''}</div>`;
+    const teams = rows.map((row, index) => {
+      const team = league.teams.find(team => team.id === row.id), sales = AuctionCore.purchases(game, row.id);
+      const priciest = sales.slice().sort((a, b) => b.price - a.price)[0], star = sales.map(sale => entry(sale.playerId)).sort((a, b) => rating(b) - rating(a))[0];
+      return `<div class="summary-team"><span class="queue-number">${index + 1}</span><div class="grow"><strong>${esc(row.name)}${champions.includes(row) ? ' 🏆' : ''}</strong><small>${row.points} pts · ${row.won}W ${row.drawn}D ${row.lost}L · ${row.gf} scored · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} team rating` : ''}</small><small>Top signing: ${esc(entry(priciest.playerId).player.name)} (${money(priciest.price)})${showRatings ? ` · Best player: ${esc(star.player.name)} (${rating(star)})` : ''}</small></div></div>`;
+    }).join('');
+    return `<div class="stack"><section class="panel stack summary-hero"><div class="eyebrow">Full time · Season complete</div><h2>${champions.map(row => esc(row.name)).join(' & ')} ${champions.length > 1 ? 'are joint champions!' : 'are champions!'}</h2><p>${top.points} points from ${top.played} games · ${top.won} wins · ${top.gf} goals</p><div class="summary-stats">${stat('Goals this season', goals, `${(goals / Math.max(1, played.length)).toFixed(1)} per game`)}${biggest ? stat('Biggest win', `${biggest.result.homeGoals} – ${biggest.result.awayGoals}`, `${esc(memberName(biggest.homeId))} v ${esc(memberName(biggest.awayId))}`) : ''}${boot.length ? stat('Golden boot', esc(boot[0].name), `${boot[0].goals} goals · ${esc(memberName(boot[0].managerId))}`) : ''}${stat('Players signed', game.sales.length, `${money(game.sales.reduce((sum, sale) => sum + sale.price, 0))} spent in total`)}</div><div class="actions">${next ? `<button class="primary" data-do="rematch" ${disabled(busy)}>Join the new game · room ${esc(next.code)} →</button>` : `<button class="primary" data-do="rematch" ${disabled(busy)}>Play again · same rules →</button>`}<button class="quiet" data-do="leave">Leave the room</button></div><p class="hint">${next ? 'A fresh lobby with the same rules is waiting for you.' : 'Play again opens a fresh lobby with a new code and the same rules. Everyone else can join it from this screen.'}</p></section><section class="panel stack"><h2>Final table</h2>${standings(rows)}</section><section class="panel stack"><h2>How every team did</h2>${teams}</section>${awardsReport(awards)}</div>`;
+  }
   function leagueScreen() {
     const game = room.game;
     if (room.status !== 'complete') return `<section class="panel stack"><div class="eyebrow">After the auction</div><h2>Your league is coming</h2><p>Once all ${game.totalPlayers} players are signed, we’ll reveal the bargains and big spends. Arrange every XI, then everyone plays each other home and away.</p><button data-do="tab" data-id="auction">Back to the auction</button></section>`;
     const awards = LeagueCore.awards(game), check = LeagueCore.readiness(game), league = room.league, count = league ? LeagueCore.roundCount(league) : 0;
-    const playerAward = (label, sale) => `<div class="award"><div class="eyebrow">${label}</div><strong>${esc(entry(sale.playerId).player.name)}</strong><p>${esc(memberName(sale.managerId))} · ${money(sale.price)}</p>${showRatings ? `<span class="pill">${sale.rating} rated</span>` : ''}</div>`;
-    const report = `<div class="grid">${playerAward('Bargain of the draft', awards.bargain)}${playerAward('Biggest signing', awards.biggestBuy)}<div class="award wide"><div class="eyebrow">Biggest spender</div><strong>${esc(awards.biggestSpender.name)}</strong><p>${money(awards.biggestSpender.spent)} spent on their XI</p><p class="hint gap-top">Bargains compare each fee with a share of the total spend weighted by player rating.</p></div></div>`;
+    const report = awardsReport(awards);
     if (!league) return `<div class="stack">${report}<section class="panel stack"><h2>Meet the teams</h2>${game.managers.map(manager => { const team = LeagueCore.team(game, manager); return `<div class="sale-row"><div><strong>${esc(manager.name)}</strong><small>${team.placed}/11 placed · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} overall` : ''}</small></div><button data-do="team" data-id="${manager.id}">View XI</button></div>`; }).join('')}<p>${esc(check.message)}</p>${room.isHost ? `<button class="primary" data-do="startLeague" ${disabled(!check.ready || !connected || busy)}>Start the home & away league →</button>` : '<p class="hint">The host will start once everyone has placed their XI.</p>'}</section></div>`;
-    const finished = league.round >= count, rows = LeagueCore.table(league);
-    const scorers = new Map(); for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) { const value = scorers.get(scorer.playerId) || { name: scorer.name, goals: 0 }; value.goals++; scorers.set(scorer.playerId, value); }
-    return `<div class="stack"><section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${league.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div><div class="scroll-table"><table><thead><tr><th>#</th><th>Manager</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>${rows.map((row, i) => `<tr><td>${i + 1}</td><td>${esc(row.name)}</td>${['played', 'won', 'drawn', 'lost', 'gf', 'ga', 'gd'].map(key => `<td>${row[key]}</td>`).join('')}<td class="points">${row.points}</td></tr>`).join('')}</tbody></table></div>${room.isHost && !finished ? `<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy)}>Play matchday ${league.round + 1} →</button><button class="quiet" data-do="finishLeague" ${disabled(!connected || busy)}>Simulate remaining season</button></div>` : !finished ? '<p class="hint">Your host plays the next matchday. Results update live for everyone.</p>' : ''}</section><section class="panel stack"><h2>Fixtures & results</h2>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, league.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${round >= league.round ? ' · Upcoming' : ''}</summary>${league.fixtures.filter(fixture => fixture.round === round).map(fixture => { const result = fixture.result; return `<div class="fixture"><div class="row"><span class="team-name">${esc(memberName(fixture.homeId))}</span><span class="score">${result ? `${result.homeGoals} – ${result.awayGoals}` : 'vs'}</span><span class="team-name">${esc(memberName(fixture.awayId))}</span></div>${result ? `<small>${result.homeScorers.map(scorer => `${esc(scorer.name)} ${scorer.minute}′`).join(', ') || '—'}<br>${result.awayScorers.map(scorer => `${esc(scorer.name)} ${scorer.minute}′`).join(', ') || '—'}</small>` : ''}</div>`; }).join('')}</details>`).join('')}</section>${scorers.size ? `<section class="panel stack"><h2>Golden boot</h2>${[...scorers.values()].sort((a, b) => b.goals - a.goals).slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goals</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
+    // While a matchday is live, the table and results wait for full time.
+    const live = liveNow(), shown = live ? { ...league, round: live.round, fixtures: league.fixtures.map(fixture => fixture.round === live.round ? { ...fixture, result: null } : fixture) } : league;
+    const finished = !live && league.round >= count, rows = LeagueCore.table(shown);
+    const scorers = goldenBoot(shown);
+    return `<div class="stack">${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.isHost ? `<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button><button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? '<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>' : ''}</section><section class="panel stack"><h2>Fixtures & results</h2>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goals</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
   }
   function render() {
     const focus = document.activeElement, focusId = focus?.id, value = focus && ['INPUT', 'SELECT'].includes(focus.tagName) ? focus.value : null;
     const caret = focus?.tagName === 'INPUT' && ['text', 'search'].includes(focus.type) ? [focus.selectionStart, focus.selectionEnd] : null;
     $('#sound-toggle').hidden = !room; $('#sound-toggle').textContent = sound.enabled ? 'Sound on' : 'Sound off'; $('#sound-toggle').setAttribute('aria-pressed', sound.enabled);
-    $('#rating-toggle').hidden = !room?.game; $('#rating-toggle').textContent = showRatings ? 'Hide ratings' : 'Show ratings';
+    $('#rating-toggle').hidden = !room?.game || !room.isHost; $('#rating-toggle').textContent = showRatings ? 'Hide ratings' : 'Show ratings';
     connection();
-    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen }[tab] || auctionScreen)();
+    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen, summary: room.finished ? summaryScreen : leagueScreen }[tab] || auctionScreen)();
     if (room?.game && tab === 'auction') {
       $('.auction-layout').insertAdjacentHTML('afterend', skippedPlayers());
       if (room.round?.status === 'passed') $('.player-card .eyebrow').textContent = 'SKIPPED · QUEUED FOR LATER';
@@ -655,7 +743,22 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     if (focusId) { const next = document.getElementById(focusId); if (next && !next.disabled) { if (value !== null && focusId !== 'bid-value') next.value = value; next.focus({ preventScroll: true }); if (caret) next.setSelectionRange(...caret); } }
     updateTimer();
   }
+  function updateLive() {
+    const live = liveNow(), key = live ? `${room.id}:${live.round}:${live.startsAt}` : null;
+    if (key !== liveKey) {
+      if (liveKey && !key) { liveKey = null; sound.whistle(); if (summaryPending) { summaryPending = false; tab = 'summary'; } render(); return; }
+      liveKey = key; shownMinute = -1; liveGoals = goalsBy(live, liveMinute(live));
+      if (liveMinute(live) < 2) sound.whistle();
+    }
+    if (!live) return;
+    const minute = liveMinute(live);
+    if (minute === shownMinute) return;
+    shownMinute = minute;
+    const goals = goalsBy(live, minute); if (goals > liveGoals) sound.goal(); liveGoals = goals;
+    const element = document.getElementById('live-matchday'); if (element) element.innerHTML = liveInner(live);
+  }
   function updateTimer() {
+    updateLive();
     const round = room?.round;
     if (round?.status === 'open' && clock() >= round.opensAt && revealDrawn !== round.id) { revealDrawn = round.id; if (tab === 'auction') render(); return; }
     const timer = $('#timer'); if (!timer || !round) return;
@@ -666,7 +769,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   $('#sound-toggle').addEventListener('click', () => { sound.toggle(); render(); });
   document.addEventListener('pointerdown', () => sound.unlock(), true);
-  $('#rating-toggle').addEventListener('click', () => { showRatings = !showRatings; storage.set('ratings', showRatings ? 'show' : 'hide'); render(); });
+  $('#rating-toggle').addEventListener('click', () => action('ratings', { show: !showRatings }));
   $('#app').addEventListener('input', event => {
     if (event.target.id === 'bid-value') bidText = event.target.value;
     if (['season-from', 'season-to', 'rating-min', 'rating-max'].includes(event.target.id)) {
@@ -715,13 +818,19 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     }
     if (type === 'unplace') { selectedSlot = null; return action(type, { playerId: id }); }
     if (type === 'clearBoard') { selectedSlot = null; return action(type); }
-    if (type === 'increment') { const min = room.round.leader ? room.round.leader.price + 1 : 0, value = Math.floor(Number(bidText)); bidText = String(Number.isFinite(value) && value >= min ? value + +id : min + +id); $('#bid-value').value = bidText; return; }
+    if (type === 'increment') { const min = minBid(room), value = Math.floor(Number(bidText)); bidText = String(Number.isFinite(value) && value >= min ? value + +id : min + +id); $('#bid-value').value = bidText; return; }
     if (type === 'copy-code' || type === 'share') {
       const url = `${location.origin}/?code=${room.code}`;
       try { if (type === 'share' && navigator.share) await navigator.share({ title: 'Join my Touchline auction', text: `Room ${room.code}`, url }); else { await navigator.clipboard.writeText(type === 'share' ? url : room.code); toast(type === 'share' ? 'Invite link copied' : 'Room code copied'); } } catch (error) { if (error.name !== 'AbortError') toast(`Room ${room.code} · ${url}`); }
       return;
     }
-    if (type === 'leave') { clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); } socket = null; room = null; connected = false; storage.set('room', null); screen = 'home'; render(); return; }
+    if (type === 'leave') { leaveRoom(); render(); return; }
+    if (type === 'rematch') {
+      if (busy) return;
+      busy = true; render();
+      try { await api('/api/rematch', { roomId: room.id }); connect(); } catch (error) { toast(error.message); } finally { busy = false; render(); }
+      return;
+    }
     if (type === 'ready') return action(type, { ready: !room.members.find(member => member.managerId === room.me).ready });
     if (type === 'kick') return action(type, { managerId: id });
     if (type === 'transferHost') return action(type, { managerId: $('#next-host').value });
@@ -772,11 +881,24 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   window.addEventListener('pointercancel', endDrag);
   document.addEventListener('touchmove', event => { if (drag?.ready) event.preventDefault(); }, { passive: false });
   $('#app').addEventListener('click', event => { if (suppressClick) { suppressClick = false; event.stopPropagation(); event.preventDefault(); } }, true);
+  function leaveRoom() {
+    clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); }
+    socket = null; room = null; connected = false; storage.set('room', null); screen = 'home'; tab = 'auction'; liveKey = null; summaryPending = false;
+    history.replaceState(null, '', '/');
+  }
   async function init() {
     try {
+      // Read the invite code first: restoring a saved room rewrites the address bar.
+      const code = new URLSearchParams(location.search).get('code'), name = storage.get('name');
       const results = await Promise.all([api('/api/session', {}), api('/api/options')]); seasons = results[1].seasons;
       const id = storage.get('room');
-      if (id) { try { await api(`/api/room/${id}`); connect(); } catch (error) { if ([403, 404].includes(error.status)) storage.set('room', null); toast(error.message); } }
+      if (id) { try { await api(`/api/room/${id}`); } catch (error) { if ([403, 404].includes(error.status)) storage.set('room', null); toast(error.message); } }
+      // An invite link for a different room replaces the saved one, joining its lobby when we know the name.
+      if (/^\d{4}$/.test(code || '') && room?.code !== code) {
+        if (room) { leaveRoom(); history.replaceState(null, '', `/?code=${code}`); }
+        if (name) { try { await api('/api/join', { name, code }); } catch (error) { toast(error.message); } }
+      }
+      if (room) connect();
       render();
     } catch (error) { $('#app').innerHTML = `<div class="panel stack error-panel"><h2>Couldn’t reach the game server</h2><p>${esc(error.message)}</p><p>Online play needs the Node server. Locally, run <strong>npm start</strong> and open <a href="http://localhost:4174">localhost:4174</a>.</p><button onclick="location.reload()">Try again</button></div>`; }
   }

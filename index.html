@@ -665,6 +665,13 @@ globalThis.DRAFT_GAME_DATA = {"players":[{"id":"emmanuel-eboue","name":"Emmanuel
       const base = mine ? 880 : 660;
       tone(base, 0, .1, { type: 'triangle', volume: .16 }); tone(base * 1.5, .07, .16, { type: 'triangle', volume: .14 });
     },
+    goal() {
+      [392, 523, 659, 784, 1047].forEach((frequency, index) => tone(frequency, index * .07, .35, { type: 'triangle', volume: .12 }));
+    },
+    // Two short referee blasts for kick-off and full time.
+    whistle() {
+      [0, .3].forEach(start => tone(2900, start, .2, { type: 'square', volume: .035, slide: 2700 }));
+    },
     sold(mine = false) {
       [523, 659, 784, mine ? 1047 : 988].forEach((frequency, index) => tone(frequency, index * .09, .28, { type: 'triangle', volume: .13 }));
     },

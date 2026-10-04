@@ -32,13 +32,12 @@ room = engine.apply(room, 'b', { type: 'bid', price: 200, requestId: token }, ti
 const deadline = room.round.deadline;
 assert.equal(engine.apply(room, 'b', { type: 'bid', price: 200, requestId: token }, time).changed, false);
 assert.equal(room.round.deadline, deadline);
-assert.throws(() => command(room, 'a', 'withdraw'), /locked in/, 'Bidders cannot back out');
-assert.deepEqual(engine.view(room, 'a').round.bidders.sort(), ['manager-1', 'manager-2']);
+assert.throws(() => command(room, 'b', 'withdraw'), /locked in/, 'The highest bidder cannot back out');
+room = command(room, 'a', 'withdraw');
+assert.deepEqual(engine.leading(room), ['manager-2', 200], 'An outbid manager can back out');
+assert.throws(() => command(room, 'a', 'bid', { price: 250 }), /out/);
+assert.equal(room.round.status, 'open');
 room = command(room, 'c', 'withdraw');
-assert.deepEqual(engine.leading(room), ['manager-2', 200]);
-assert.throws(() => command(room, 'c', 'bid', { price: 250 }), /out/);
-assert.equal(room.round.status, 'open', 'Two locked-in bidders wait for the timer');
-time = room.round.deadline; room = engine.apply(room, null, { type: 'tick' }, time).room;
 assert.equal(room.round.status, 'sold'); assert.equal(room.round.winnerId, 'manager-2');
 assert.equal(room.game.sales.length, 1); assert.equal(auction.budget(room.game, 'manager-2'), 800);
 assert.equal(auction.STARTING_BUDGET, 1000, 'Budgets are £1bn in whole millions');
@@ -60,27 +59,57 @@ const late = engine.apply(room, 'b', { type: 'bid', price: 20 }, time);
 assert(late.error); room = late.room; assert.equal(room.round.status, 'sold');
 assert.equal(room.game.sales.length, 2); assert.equal(engine.apply(room, null, { type: 'tick' }, time).changed, false);
 room = command(room, 'a', 'reveal'); time += 2000;
+assert.throws(() => command(room, 'c', 'bid', { price: 0 }), /£1m/, 'Free bids need an empty budget');
 room = command(room, 'a', 'withdraw'); room = command(room, 'b', 'withdraw');
 assert.equal(room.round.status, 'open'); assert.equal(room.round.deadline, null);
-room = command(room, 'c', 'bid', { price: 0 }); assert.equal(room.round.status, 'sold');
+assert.throws(() => command(room, 'c', 'bid', { price: 0 }), /£1m/, 'Free bids need an empty budget even when alone');
+room = command(room, 'c', 'bid', { price: 1 }); assert.equal(room.round.status, 'sold');
 room = command(room, 'a', 'reveal'); time += 2000;
 room = command(room, 'a', 'withdraw'); room = command(room, 'b', 'withdraw'); room = command(room, 'c', 'withdraw');
 assert.equal(room.round.status, 'passed'); assert.equal(room.game.sales.length, 3);
+// A manager who spends everything can only take a player free once everyone else is out.
+room = command(room, 'a', 'reveal'); time += 2000;
+room = command(room, 'a', 'withdraw'); room = command(room, 'b', 'withdraw');
+room = command(room, 'c', 'bid', { price: auction.budget(room.game, 'manager-3') }); assert.equal(auction.budget(room.game, 'manager-3'), 0);
+room = command(room, 'a', 'reveal'); time += 2000;
+assert.throws(() => command(room, 'c', 'bid', { price: 0 }), /£1m/);
+room = command(room, 'a', 'withdraw'); room = command(room, 'b', 'withdraw');
+room = command(room, 'c', 'bid', { price: 0 }); assert.equal(room.round.status, 'sold'); assert.equal(room.round.winnerId, 'manager-3');
+// Rating visibility is a room setting only the host controls.
+assert.throws(() => command(room, 'b', 'ratings', { show: false }), /Only the host/);
+room = command(room, 'a', 'ratings', { show: false }); assert.equal(engine.view(room, 'c').showRatings, false);
+room = command(room, 'a', 'ratings', { show: true }); assert.equal(engine.view(room, 'c').showRatings, true);
 assert.throws(() => command(lobby(), 'a', 'startLeague'), /Finish the auction/);
 // Complete every squad, simulate all double round-robin fixtures, restore results.
 while (room.status !== 'complete') {
   room = command(room, 'a', 'reveal'); time += 2000;
-  const winner = room.members.find(member => auction.purchases(room.game, member.managerId).length < 11);
-  room = command(room, winner.uid, 'bid', { price: 0 });
+  const active = engine.view(room, 'a').round.active, keeper = room.game.pool.find(entry => entry.id === room.round.playerId).player.positions.includes('GK');
+  for (const member of room.members) if (keeper && !active.includes(member.managerId) && auction.purchases(room.game, member.managerId).length < 11) assert.throws(() => command(room, member.uid, 'bid', { price: 1 }), /already have a goalkeeper/);
+  const winner = room.members.find(member => active.includes(member.managerId)), broke = auction.budget(room.game, winner.managerId) === 0;
+  if (broke) for (const other of room.members) if (other !== winner && active.includes(other.managerId)) room = command(room, other.uid, 'withdraw');
+  room = command(room, winner.uid, 'bid', { price: broke ? 0 : 1 });
   if (room.round.status === 'open') { time = room.round.deadline; room = command(room, null, 'tick'); }
 }
+for (const manager of room.game.managers) assert.equal(auction.purchases(room.game, manager.id).filter(sale => room.game.pool.find(entry => entry.id === sale.playerId).player.positions.includes('GK')).length, 1, 'Every XI ends with exactly one goalkeeper');
 room.members.forEach(member => { room = command(room, member.uid, 'autoPlace'); });
 assert(room.game.managers.every(manager => manager.board.filter(Boolean).length === 11));
 room = command(room, 'a', 'startLeague');
 assert.throws(() => command(room, 'b', 'playRound'), /Only the host/);
 assert.throws(() => command(room, 'a', 'autoPlace'), /locked/);
-room = command(room, 'a', 'finishLeague');
+room = command(room, 'a', 'playRound');
+assert.deepEqual(engine.view(room, 'b').live, { round: 0, startsAt: time, endsAt: time + 18000 });
+assert.throws(() => command(room, 'a', 'playRound'), /in play/); assert.throws(() => command(room, 'a', 'finishLeague'), /in play/);
+time = room.live.endsAt;
+room = command(room, 'a', 'finishLeague'); assert.equal(room.live, null);
 assert.equal(room.league.fixtures.length, 6); assert.equal(room.league.round, 6);
 assert(league.table(room.league).every(row => row.played === 4));
 assert.deepEqual(engine.unpack(engine.pack(room)).league, room.league);
+// Finished rooms point every member at a single rematch lobby.
+assert(engine.finished(room) && engine.view(room, 'b').finished);
+assert.throws(() => engine.linkNext(lobby(), 'a', { id: 'early', code: '0003' }), /Finish the league/);
+assert.throws(() => engine.linkNext(room, 'stranger', { id: 'x', code: '0004' }), /not a member/);
+const linked = engine.linkNext(room, 'b', { id: 'next', code: '0002' });
+assert(linked.changed); assert.deepEqual(engine.view(linked.room, 'c').next, { id: 'next', code: '0002' });
+const second = engine.linkNext(linked.room, 'c', { id: 'other', code: '0005' });
+assert.equal(second.changed, false); assert.equal(second.room.next.id, 'next', 'The first rematch wins');
 console.log('Online engine passed: hidden balanced pool, timer extensions, withdrawals, late bids, budgets, ownership, save/restore and full league.');

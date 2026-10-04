@@ -26,6 +26,8 @@ async function run() {
     assert.equal((await b.call('/api/join', { name: 'Blair', code })).status, 200);
     assert.equal((await c.call('/api/join', { name: 'Casey', code })).status, 200);
     assert.equal((await outsider.call('/api/join', { name: 'Fourth', code })).status, 409);
+    assert.equal((await a.call('/api/rematch', { roomId: id })).status, 409, 'No rematch before the league finishes');
+    assert.equal((await outsider.call('/api/rematch', { roomId: id })).status, 403);
     const action = (user, type, details = {}) => user.call('/api/action', { roomId: id, command: { type, requestId: crypto.randomUUID(), ...details } });
     await Promise.all([action(a, 'ready', { ready: true }), action(b, 'ready', { ready: true }), action(c, 'ready', { ready: true })]);
     assert.equal((await action(b, 'start')).status, 403);

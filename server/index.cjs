@@ -58,18 +58,37 @@ async function createServer({ store, now = Date.now, production = process.env.NO
   });
   app.get('/api/options', (req, res) => res.json({ seasons: engine.seasons }));
   app.get('/api/clock', (req, res) => res.json({ serverTime: now() }));
-  app.post('/api/create', auth, async (req, res) => {
+  async function createRoom(uid, displayName, capacity, config) {
     await store.cleanup(now());
     for (let attempt = 0; attempt < 30; attempt++) {
-      const room = engine.create({ id: crypto.randomUUID(), code: String(crypto.randomInt(10000)).padStart(4, '0'), uid: req.uid, displayName: req.body.name, capacity: req.body.capacity, config: req.body.config || {}, seed: crypto.randomBytes(4).readUInt32LE(), now: now() });
-      if (await store.create(room)) return res.json(state(room, req.uid));
+      const room = engine.create({ id: crypto.randomUUID(), code: String(crypto.randomInt(10000)).padStart(4, '0'), uid, displayName, capacity, config, seed: crypto.randomBytes(4).readUInt32LE(), now: now() });
+      if (await store.create(room)) return room;
     }
     throw new engine.RoomError('No room codes are available. Please try later.', 503);
+  }
+  const joinRoom = (id, uid, displayName) => store.mutate(id, room => ({ room: engine.join(room, uid, displayName, now()), changed: !room.members.some(member => member.uid === uid) }));
+  app.post('/api/create', auth, async (req, res) => {
+    const room = await createRoom(req.uid, req.body.name, req.body.capacity, req.body.config || {});
+    res.json(state(room, req.uid));
   });
   app.post('/api/join', auth, async (req, res) => {
     if (typeof req.body.code !== 'string' || !/^\d{4}$/.test(req.body.code)) throw new engine.RoomError('Enter the four-digit room code.');
     const id = await store.byCode(req.body.code, now()); if (!id) throw new engine.RoomError('Room not found. Check the code with your host.', 404);
-    const result = await store.mutate(id, room => ({ room: engine.join(room, req.uid, req.body.name, now()), changed: !room.members.some(member => member.uid === req.uid) }));
+    const result = await joinRoom(id, req.uid, req.body.name);
+    res.json(state(result.room, req.uid));
+  });
+  // Play again: the first member to ask creates a fresh lobby with the same rules; everyone else joins it.
+  app.post('/api/rematch', auth, async (req, res) => {
+    const old = await getRoom(req.body.roomId), me = old.members.find(member => member.uid === req.uid);
+    if (!me) throw new engine.RoomError('You are not a member of this room.', 403);
+    if (!engine.finished(old)) throw new engine.RoomError('Finish the league before starting a new game.', 409);
+    let created = null, target = old.next;
+    if (!target) {
+      created = await createRoom(req.uid, me.name, old.capacity, old.config);
+      target = (await store.mutate(old.id, room => engine.linkNext(room, req.uid, { id: created.id, code: created.code }))).room.next;
+    }
+    if (created && target.id === created.id) return res.json(state(created, req.uid));
+    const result = await joinRoom(target.id, req.uid, me.name);
     res.json(state(result.room, req.uid));
   });
   app.get('/api/room/:id', auth, async (req, res) => {

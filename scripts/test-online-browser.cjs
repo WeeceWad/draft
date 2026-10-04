@@ -24,6 +24,7 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     await host.locator('[data-do=reveal]').click(); await host.locator('.spinner').waitFor();
     await host.locator('#bid-value:not([disabled])').waitFor();
     await guest.locator('#bid-value:not([disabled])').waitFor();
+    assert(await guest.locator('.player-symbol').evaluate(element => element.scrollWidth <= element.clientWidth + 1), 'Position text fits its badge');
     await guest.locator('#bid-value').fill('10'); await guest.locator('#bid-form .primary').click();
     await host.waitForFunction(() => document.querySelector('.bid-price')?.textContent === '£10m');
     assert.match(await host.locator('#timer').innerText(), /0:59|1:00/);
@@ -48,7 +49,9 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     await host.locator('nav [data-do=tab][data-id=teams]').click(); await host.locator('[data-do=team][data-id=manager-2]').click();
     assert.equal(await host.locator('.slot:disabled').count(), 11);
     assert.equal(await host.locator('.slot .paid').first().innerText(), '£10m');
-    await host.locator('#rating-toggle').click(); assert.equal(await host.locator('.small-rating').count(), 0);
+    assert(await guest.locator('#rating-toggle').isHidden(), 'Only the host can change rating visibility');
+    await host.locator('#rating-toggle').click(); await host.waitForFunction(() => !document.querySelector('.small-rating'));
+    await guest.waitForFunction(() => !document.querySelector('.small-rating'));
     await host.locator('nav [data-do=tab][data-id=transfers]').click(); assert.match(await host.locator('.sale-row').innerText(), /Blair/); assert.equal(await host.locator('.sale-row .rating').count(), 0);
     await host.locator('nav [data-do=tab][data-id=auction]').click();
     const skippedNames = [];
@@ -82,8 +85,8 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
       const engine = require('../server/room-engine.cjs'), auction = require('../src/auction-core.js'); let now = Date.now();
       while (room.game.remaining.some(playerId => !room.game.skipped.includes(playerId))) {
         room = engine.apply(room, room.hostUid, { type: 'reveal' }, now).room; now += 2000;
-        const winner = room.members.slice().sort((a, b) => auction.purchases(room.game, a.managerId).length - auction.purchases(room.game, b.managerId).length)[0];
-        room = engine.apply(room, winner.uid, { type: 'bid', price: 0 }, now).room;
+        const active = engine.view(room, room.hostUid).round.active, winner = room.members.filter(member => active.includes(member.managerId)).sort((a, b) => auction.purchases(room.game, a.managerId).length - auction.purchases(room.game, b.managerId).length)[0];
+        room = engine.apply(room, winner.uid, { type: 'bid', price: 1 }, now).room;
         if (room.round.status === 'open') { now = room.round.deadline; room = engine.apply(room, null, { type: 'tick' }, now).room; }
       }
       return { room, changed: true };
@@ -100,21 +103,39 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     for (const name of [skippedNames[1], skippedNames[0]]) {
       await host.locator('[data-do=reveal]').click(); await host.locator('.player-card .eyebrow').filter({ hasText: 'BACK FOR BIDDING' }).waitFor();
       assert.equal(await host.locator('.player-card h2').innerText(), name);
-      const current = await service.store.get(id), winner = current.members.find(member => require('../src/auction-core.js').purchases(current.game, member.managerId).length < 11);
+      const current = await service.store.get(id), active = require('../server/room-engine.cjs').view(current, current.hostUid).round.active, winner = current.members.find(member => active.includes(member.managerId));
       const page = pages[current.members.indexOf(winner)];
-      await page.locator('#bid-value:not([disabled])').waitFor(); await page.locator('#bid-value').fill('0'); await page.locator('#bid-form .primary').click();
-      for (const other of pages.filter((_, index) => current.members[index].managerId !== winner.managerId && require('../src/auction-core.js').purchases(current.game, current.members[index].managerId).length < 11)) await other.locator('[data-do=withdraw]').click();
+      await page.locator('#bid-value:not([disabled])').waitFor(); await page.locator('#bid-value').fill('1'); await page.locator('#bid-form .primary').click();
+      for (const other of pages.filter((_, index) => current.members[index].managerId !== winner.managerId && active.includes(current.members[index].managerId))) await other.locator('[data-do=withdraw]').click();
       await host.waitForFunction(() => document.querySelector('.player-card')?.textContent.includes('signed them for'));
     }
     assert.equal(await host.locator('#skipped-players').count(), 0);
     for (const page of pages) { await page.locator('nav [data-do=tab][data-id=teams]').click(); await page.locator(`[data-do=team][data-id=manager-${pages.indexOf(page) + 1}]`).click(); await page.locator('[data-do=autoPlace]').click(); }
     await host.locator('nav [data-do=tab][data-id=league]').click(); await host.locator('[data-do=startLeague]').click();
     await guest.locator('nav [data-do=tab][data-id=league]').click(); assert.equal(await guest.locator('[data-do=playRound]').count(), 0);
-    await host.locator('[data-do=playRound]').click(); await guest.waitForFunction(() => document.querySelector('.fixture .score')?.textContent !== 'vs');
+    await host.locator('[data-do=playRound]').click(); await guest.locator('#live-matchday').waitFor();
+    assert(await host.locator('[data-do=playRound]').isDisabled(), 'The next matchday waits for the live one');
+    await guest.waitForFunction(() => /^[1-9]\d?′$/.test(document.querySelector('.live-minute')?.textContent || ''));
     await host.locator('[data-do=finishLeague]').click(); await guest.waitForFunction(() => document.querySelector('h2')?.textContent.includes('champions'));
     await guest.reload(); await guest.locator('table').waitFor(); assert.equal(await guest.locator('tbody tr').count(), 3);
     for (const width of [320, 390, 430, 1440]) { await guest.setViewportSize({ width, height: 900 }); assert(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth)); assert(await guest.evaluate(() => document.querySelector('.points').getBoundingClientRect().right <= document.querySelector('.scroll-table').getBoundingClientRect().right + 1), 'Points must stay visible on mobile'); }
     await guest.setViewportSize({ width: 390, height: 844 }); await guest.screenshot({ path: path.resolve(__dirname, '../preview-online-league.png'), fullPage: true });
+    // End-of-season summary, then a rematch lobby with a new code for everyone.
+    assert.match(await guest.locator('.summary-hero').innerText(), /champions/);
+    assert.equal(await guest.locator('.summary-team').count(), 3);
+    await host.locator('nav [data-do=tab][data-id=summary]').click(); await host.locator('[data-do=rematch]').click(); await host.locator('.big-code').waitFor();
+    const newCode = await host.locator('.big-code').innerText();
+    assert.notEqual(newCode, code); assert(host.url().endsWith(`?code=${newCode}`));
+    assert.equal(await host.locator('.member').count(), 1); assert.equal(await host.locator('.pill').first().innerText(), '1/3 joined');
+    await guest.locator('[data-do=rematch]').filter({ hasText: newCode }).waitFor(); await guest.locator('[data-do=rematch]').click(); await guest.locator('.big-code').waitFor();
+    assert.equal(await guest.locator('.big-code').innerText(), newCode);
+    // Opening the new invite link swaps the old finished room for the fresh lobby.
+    await third.goto(`${base}/?code=${newCode}`); await third.locator('.big-code').waitFor();
+    assert.equal(await third.locator('.big-code').innerText(), newCode); assert.equal(await third.locator('.member').count(), 3);
+    await third.reload(); await third.locator('.big-code').waitFor(); assert.equal(await third.locator('.big-code').innerText(), newCode);
+    await third.locator('.room-head ~ details summary, details summary.hint').first().click(); await third.locator('[data-do=leave]').click();
+    await third.locator('#join-form').waitFor(); assert(third.url().endsWith('/'));
+    await guest.screenshot({ path: path.resolve(__dirname, '../preview-online-rematch.png'), fullPage: true });
     assert.deepEqual(errors, []);
     console.log('Online browser passed: three separate managers, live bidding/input retention, withdrawals, reload/rejoin, own-only pitch edits, prices/ratings, mobile layouts and shared full league.');
   } finally { await browser.close(); await service.close(); }

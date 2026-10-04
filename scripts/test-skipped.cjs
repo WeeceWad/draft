@@ -54,15 +54,15 @@ assert.deepEqual(auction.restore(legacy, engine.players).skipped, [legacy.lastPa
 // A single unsold player can keep returning without duplicate entries or early completion.
 while (room.game.remaining.length > 1) {
   act('a', 'reveal'); now += 2000;
-  const manager = room.members.find(member => auction.purchases(room.game, member.managerId).length < 11);
-  act(manager.uid, 'bid', { price: 0 });
+  const active = engine.view(room, 'a').round.active, manager = room.members.find(member => active.includes(member.managerId));
+  act(manager.uid, 'bid', { price: 1 });
   if (room.round.status === 'open') { now = room.round.deadline; act(null, 'tick'); }
 }
 const lastId = room.game.remaining[0];
 for (let index = 0; index < 3; index++) { act('a', 'reveal'); now += 2000; assert.equal(room.round.playerId, lastId); act('a', 'skip'); assert.deepEqual(room.game.skipped, [lastId]); assert.equal(room.status, 'draft'); }
 act('a', 'reveal'); now += 2000;
-const lastManager = room.members.find(member => auction.purchases(room.game, member.managerId).length < 11);
-act(lastManager.uid, 'bid', { price: 0 });
+const lastActive = engine.view(room, 'a').round.active, lastManager = room.members.find(member => lastActive.includes(member.managerId));
+act(lastManager.uid, 'bid', { price: 1 });
 assert.equal(room.status, 'complete'); assert.deepEqual(room.game.skipped, []);
 assert.equal(room.game.sales.length, 33);
 console.log('Skipped-player checks passed: all withdrawal/skip/expiry paths, full-cycle deferral, FIFO returns/re-skips, fresh bidding, privacy, save migration, validation and last-player completion.');

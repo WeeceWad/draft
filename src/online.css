@@ -28,3 +28,32 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .drop-over{outline:3px solid var(--green)!important;outline-offset:2px}
 .squad-list.drop-over{border-radius:12px}
 @media(max-width:799px){.top #sound-toggle{padding:5px 8px;min-height:38px;font-size:11px}}
+.player-symbol{font-size:34px;letter-spacing:-1px;line-height:1;overflow:hidden}
+.summary-hero{background:radial-gradient(ellipse at 50% 0,#2b4239,transparent 70%),var(--panel)}
+.summary-hero h2{font-size:clamp(24px,5vw,36px);overflow-wrap:anywhere}
+.summary-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.summary-stat{background:#0e1520;border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
+.summary-stat small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.summary-stat strong{display:block;font-size:20px;margin:2px 0;overflow-wrap:anywhere}
+.summary-stat span{font-size:12px;color:var(--muted)}
+.summary-team{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.summary-team .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.summary-team small{display:block;color:var(--muted);font-size:12px}
+@media(max-width:799px){.player-symbol{font-size:24px}.tabs{gap:2px;padding-left:4px;padding-right:4px}.tabs button{font-size:11px;padding:10px 2px}.summary-stats{grid-template-columns:1fr 1fr}}
+[hidden]{display:none!important}
+.fixture-line{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}
+.fixture-line .team-name{min-width:0;overflow-wrap:anywhere}
+.fixture-line .away{text-align:right}
+.goal-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+.goals{list-style:none;margin:0;padding:0;display:grid;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.goals li{display:flex;gap:6px;align-items:baseline}
+.goals.away li{justify-content:flex-end;text-align:right}
+.goal-name{overflow-wrap:anywhere;min-width:0}
+.goal-minute{color:var(--green);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.live-panel{border-color:#47633c;background:radial-gradient(ellipse at 50% 0,#2b4239,transparent 70%),var(--panel)}
+.live-label{color:var(--red)}
+.live-minute{font-size:40px;font-variant-numeric:tabular-nums;color:var(--green)}
+.live-clock{height:6px;border-radius:3px;background:#0e1520;overflow:hidden}
+.live-clock span{display:block;height:100%;background:var(--green);transition:width .3s linear}
+.live-panel .score{font-size:28px}
+.summary-stat span{display:block;overflow-wrap:anywhere}
