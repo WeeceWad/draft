@@ -97,3 +97,4 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .lobby-rules{margin-top:20px}
 .check input[type=checkbox]{min-height:0;width:20px;height:20px;padding:0}
 @media(max-width:799px){.lobby-rules{margin-top:14px}}
+.formation-pick{width:auto!important;min-height:38px!important;padding:6px 10px!important;font-weight:700}

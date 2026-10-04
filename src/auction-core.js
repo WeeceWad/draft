@@ -17,7 +17,7 @@
     });
   }
   function balance(eligible, formation, managerCount, random = Math.random) {
-    const shape = draft.formations[formation];
+    const shape = draft.poolShape(formation);
     if (!shape || !Number.isInteger(managerCount) || managerCount < 2 || managerCount > 8) return { error: 'Choose a formation and between 2 and 8 managers.' };
     if (eligible.length < managerCount * 11) return { error: `You need at least ${managerCount * 11} different players. Widen your season or rating range.` };
     const needs = Array.from({ length: managerCount }, () => shape.map(slot => slot.position)).flat();
@@ -116,7 +116,7 @@
   function restore(saved, players) {
     try {
       const config = saved.config;
-      if (saved.version !== 1 || !draft.formations[config.formation] || !['peak', 'season'].includes(config.mode)
+      if (saved.version !== 1 || !draft.poolShape(config.formation) || !['peak', 'season'].includes(config.mode)
         || !Number.isInteger(config.managerCount) || config.managerCount < 2 || config.managerCount > 8
         || config.names.length !== config.managerCount || config.names.some(name => typeof name !== 'string' || !name.trim() || name.length > 24)
         || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax) || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax
@@ -142,7 +142,7 @@
         const record = saved.managers[i], owned = new Set(purchases(game, manager.id).map(sale => sale.playerId));
         if (record.id !== manager.id || record.board.length !== 11 || record.board.some(id => id !== null && !owned.has(id))
           || new Set(record.board.filter(id => id !== null)).size !== record.board.filter(id => id !== null).length) throw Error('Invalid saved board');
-        return { ...manager, board: record.board.slice() };
+        return { ...manager, board: record.board.slice(), ...(draft.formations[record.formation] ? { formation: record.formation } : {}) };
       });
       if (!Array.isArray(saved.remaining) || saved.remaining.length !== game.remaining.length
         || new Set(saved.remaining).size !== saved.remaining.length || saved.remaining.some(id => !game.remaining.includes(id))) return null;

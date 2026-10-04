@@ -64,7 +64,11 @@
     next[target] = entry;
     return { squad: next, target };
   }
-  const api = { formations, fits, rating, remap, draft };
+  // 'Free' rooms let each manager pick a formation. Their pool is balanced like a 4-3-3.
+  const FREE = 'Free';
+  const poolShape = formation => formations[formation === FREE ? '4-3-3' : formation];
+  const formationOf = (game, manager) => formations[manager?.formation] ? manager.formation : formations[game.config.formation] ? game.config.formation : '4-3-3';
+  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf };
   if (typeof module !== 'undefined') module.exports = api;
   else scope.DraftCore = api;
 })(globalThis);

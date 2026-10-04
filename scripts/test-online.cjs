@@ -39,8 +39,28 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   dev = command(dev, 'a', 'startLeague'); assert(dev.league);
   assert.equal(engine.unpack(engine.pack(dev)).status, 'complete');
 }
+// Free formation: each manager picks their own shape; players move to the best-fitting spots.
+{
+  let free = lobby();
+  free = command(free, 'a', 'settings', { capacity: 3, config: { ...config, formation: 'Free', devMode: true } });
+  free.members.forEach(member => { free = command(free, member.uid, 'ready', { ready: true }); });
+  free = command(free, 'a', 'start');
+  const draft = require('../src/draft-core.js');
+  assert.equal(league.team(free.game, free.game.managers[1]).formation, '4-3-3', 'Free rooms start each XI in a 4-3-3');
+  free = command(free, 'b', 'formation', { formation: '3-5-2' });
+  free = command(free, 'c', 'formation', { formation: '5-3-2' });
+  assert.throws(() => command(free, 'b', 'formation', { formation: 'Nonsense' }), /Choose a formation/);
+  const teams = free.game.managers.map(manager => league.team(free.game, manager));
+  assert.deepEqual(teams.map(team => team.formation), ['4-3-3', '3-5-2', '5-3-2']);
+  assert(teams.every(team => team.placed === 11), 'Changing formation keeps every player on the pitch');
+  assert.equal(engine.unpack(engine.pack(free)).game.managers[1].formation, '3-5-2', 'Chosen formations survive save and restore');
+  free = command(free, 'a', 'startLeague');
+  assert.deepEqual(free.league.teams.map(team => team.formation), ['4-3-3', '3-5-2', '5-3-2']);
+  assert.throws(() => command(free, 'b', 'formation', { formation: '4-4-2' }), /locked/);
+}
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
+assert.throws(() => command(room, 'b', 'formation', { formation: '3-5-2' }), /fixed formation/);
 assert.throws(() => command(room, 'a', 'settings', { capacity: 3, config }), /locked/);
 assert.equal(room.game.pool.length, 33);
 assert.equal(room.game.pool.filter(entry => entry.player.positions.includes('GK')).length, 3);
@@ -132,17 +152,18 @@ room = command(room, 'a', 'playRound');
 assert.deepEqual(engine.view(room, 'b').live, { round: 0, startsAt: time, endsAt: time + 18000, view: 'classic' });
 time = room.live.endsAt; room = command(room, 'a', 'matchView', { view: 'pitch' }); assert.equal(engine.view(room, 'c').matchView, 'pitch');
 room = command(room, 'a', 'playRound');
-assert.deepEqual(engine.view(room, 'b').live, { round: 1, startsAt: time, endsAt: time + 75000, view: 'pitch' }, 'The beta pitch view plays longer matchdays');
+assert.deepEqual(engine.view(room, 'b').live, { round: 1, startsAt: time, endsAt: time + 150000, view: 'pitch' }, 'The beta pitch view plays longer matchdays');
 assert.throws(() => command(room, 'a', 'playRound'), /in play/); assert.throws(() => command(room, 'a', 'finishLeague'), /in play/);
 time = room.live.endsAt;
 room = command(room, 'a', 'finishLeague'); assert.equal(room.live, null);
 assert.equal(room.league.fixtures.length, 6); assert.equal(room.league.round, 6);
 const view = require('../src/match-view.js');
 for (const fixture of room.league.fixtures) {
-  const team = id => room.league.teams.find(team => team.id === id), timeline = view.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), formation: room.game.config.formation, seed: 99 });
+  const team = id => room.league.teams.find(team => team.id === id), timeline = view.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), seed: 99, duration: 150 });
   const goals = [...fixture.result.homeScorers, ...fixture.result.awayScorers];
   assert.equal(timeline.events.filter(event => event.goal).length, goals.length, 'The pitch view shows every real goal');
-  for (const goal of goals) assert(timeline.events.some(event => event.goal && event.t === league.absoluteMinute(goal) && event.text === `GOAL! ${goal.name}`));
+  for (const goal of goals) assert(timeline.events.some(event => event.goal && event.abs === league.absoluteMinute(goal) && event.text === `GOAL! ${goal.name}`));
+  assert.equal(view.clockAt(timeline, 149), view.END, 'Highlights finish at full time');
 }
 assert(league.table(room.league).every(row => row.played === 4));
 assert.deepEqual(engine.unpack(engine.pack(room)).league, room.league);

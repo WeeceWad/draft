@@ -36,9 +36,9 @@
     return rank === 0 ? 1 : rank === 1 ? .99 : rank >= 2 ? .98 : .93;
   }
   function team(game, manager) {
-    const slots = draft.formations[game.config.formation];
+    const formation = draft.formationOf(game, manager), slots = draft.formations[formation];
     const pool = new Map(game.pool.map(entry => [entry.id, entry]));
-    const backFive = slots.filter(slot => slot.position === 'CB').length === 3 && game.config.formation.startsWith('5-');
+    const backFive = slots.filter(slot => slot.position === 'CB').length === 3 && formation.startsWith('5-');
     const squad = slots.flatMap((slot, index) => {
       const entry = pool.get(manager.board[index]);
       if (!entry) return [];
@@ -55,7 +55,7 @@
     const present = Object.keys(unitWeights).filter(unit => exact[unit] > 0);
     const denominator = present.reduce((sum, unit) => sum + unitWeights[unit], 0);
     const overall = denominator ? Math.round(present.reduce((sum, unit) => sum + exact[unit] * unitWeights[unit], 0) / denominator) : 0;
-    return { id: manager.id, name: manager.name, board: manager.board.slice(), squad, overall,
+    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), squad, overall,
       ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])),
       placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length,
       spent: auction.STARTING_BUDGET - auction.budget(game, manager.id) };

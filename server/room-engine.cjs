@@ -15,7 +15,7 @@ function settings(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) fail('Choose between 2 and 8 managers.');
   const config = { managerCount: capacity, names: Array.from({ length: capacity }, (_, i) => `Manager ${i + 1}`), formation: input.formation,
     mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true };
-  if (!draft.formations[config.formation] || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
+  if (!draft.poolShape(config.formation) || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
     || config.seasonFrom > config.seasonTo || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax)
     || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax) fail('Choose valid formation, seasons and ratings.');
   const eligible = auction.candidates(players, config), coverage = auction.balance(eligible, config.formation, capacity, () => .47);
@@ -60,8 +60,8 @@ function join(room, uid, displayName, now) {
   const managerId = Array.from({ length: room.capacity }, (_, i) => `manager-${i + 1}`).find(id => !used.has(id));
   return { ...room, members: [...room.members, { uid, managerId, name: name(displayName), ready: false }] };
 }
-// A live matchday plays the full match clock in 18 seconds, or 75 in the beta pitch view.
-const LIVE_MS = { classic: 18000, pitch: 75000 };
+// A live matchday plays the full match clock in 18 seconds, or 2½ minutes of highlights in the beta pitch view.
+const LIVE_MS = { classic: 18000, pitch: 150000 };
 const isKeeper = (room, playerId) => !!room.game.pool.find(entry => entry.id === playerId)?.player.positions.includes('GK');
 const hasKeeper = (room, managerId) => auction.purchases(room.game, managerId).some(sale => isKeeper(room, sale.playerId));
 // One goalkeeper per XI: keeper owners skip other keepers, and a keeperless manager's last spot is saved for one.
@@ -100,7 +100,7 @@ function resolve(room, now, force = false) {
 }
 // Dev mode: skip the auction. Every manager gets a full XI, each player in the spot the balanced pool drew them for.
 function autoDraft(room) {
-  const slots = draft.formations[room.game.config.formation], used = new Set();
+  const slots = draft.poolShape(room.game.config.formation), used = new Set();
   let game = room.game;
   for (const manager of game.managers) slots.forEach((slot, index) => {
     const entry = game.pool.find(entry => !used.has(entry.id) && entry.allocatedPosition === slot.position);
@@ -190,6 +190,15 @@ function apply(room, uid, command, now) {
       if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
       if (!auction.purchases(room.game, me.managerId).some(sale => sale.playerId === command.playerId)) fail('You can only move your own players.', 403);
       room.game = auction.unplace(room.game, me.managerId, command.playerId); break;
+    case 'formation': {
+      // Free rooms: each manager picks a shape. Players move to the best-fitting spots in it.
+      if (!room.game || room.league) fail('Formations are locked for the league.', 409);
+      if (room.game.config.formation !== draft.FREE) fail('This room uses a fixed formation.');
+      if (!draft.formations[command.formation]) fail('Choose a formation.');
+      const manager = room.game.managers.find(manager => manager.id === me.managerId), current = draft.formationOf(room.game, manager);
+      const board = draft.remap(manager.board.map(id => id ? room.game.pool.find(entry => entry.id === id) : null), current, command.formation).map(entry => entry?.id || null);
+      room.game = { ...room.game, managers: room.game.managers.map(item => item.id === manager.id ? { ...item, formation: command.formation, board } : item) }; break;
+    }
     case 'clearBoard': {
       if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
       room.game = { ...room.game, managers: room.game.managers.map(manager => manager.id === me.managerId ? { ...manager, board: Array(11).fill(null) } : manager) }; break;
@@ -199,7 +208,7 @@ function apply(room, uid, command, now) {
       const manager = room.game.managers.find(manager => manager.id === me.managerId);
       const unplaced = auction.purchases(room.game, me.managerId).filter(sale => !manager.board.includes(sale.playerId)).map(sale => room.game.pool.find(entry => entry.id === sale.playerId));
       const squad = manager.board.map(id => id ? room.game.pool.find(entry => entry.id === id) : unplaced.shift() || null);
-      const board = draft.remap(squad, room.game.config.formation, room.game.config.formation).map(entry => entry?.id || null);
+      const formation = draft.formationOf(room.game, manager), board = draft.remap(squad, formation, formation).map(entry => entry?.id || null);
       room.game = { ...room.game, managers: room.game.managers.map(manager => manager.id === me.managerId ? { ...manager, board } : manager) }; break;
     }
     case 'startLeague': {
