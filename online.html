@@ -103,6 +103,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .resume-card h2{margin:6px 0 0}
 .resume-card p{margin:4px 0 0}
 .resume-card .actions{flex:0 1 360px}
+.manager-row td,.manager-row td:nth-child(2){color:var(--green);font-weight:800}
 </style></head>
 <body><header class="top"><a class="brand" href="/">◈ <span>TOUCHLINE<small>LIVE AUCTION</small></span></a><div id="connection" class="connection">Connecting…</div><button id="sound-toggle" class="quiet" hidden>Sound on</button><button id="rating-toggle" class="quiet" hidden>Hide ratings</button></header><main id="app"><div class="panel">Connecting to Touchline…</div></main><div id="toast" role="status" aria-live="polite"></div><script>(function (scope) {
   const row = (positions, y, xs) => positions.map((position, i) => ({ position, x: xs[i], y }));
@@ -501,12 +502,115 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     separate(homeScorers, awayScorers);
     return { homeGoals, awayGoals, homeXg, awayXg, homeScorers, awayScorers };
   }
-  function create(game, seed = Math.floor(Math.random() * 4294967296)) {
+  // 38-0's season engine (simulateSeason), fitted on its 480 historical club-seasons. These are the
+  // values its buildSeasonModel derives: expected points from overall, then win/draw odds per fixture.
+  const SEASON = { intercept: -219.30241993531556, slope: 3.4879501664022547, minOverall: 68, meanOpponent: 80, homeEdge: .05, strengthK: .035, winCeiling: .92, subShare: .12 };
+  const subWeights = { GK: 0, LB: 3, CB: 2, RB: 3, LWB: 3, RWB: 3, CDM: 5, CM: 11, CAM: 13, LM: 12, RM: 12, LW: 12, RW: 12, ST: 6 };
+  function targetPoints(overall) {
+    const fitted = SEASON.intercept + SEASON.slope * overall, floor = SEASON.intercept + SEASON.slope * SEASON.minOverall;
+    if (fitted >= floor) return Math.min(110, fitted);
+    const span = floor - 8;
+    return 8 + span * Math.exp((fitted - floor) / span);
+  }
+  function basePlan(overall) {
+    const perGame = targetPoints(overall) / 38;
+    let draw = Math.max(.05, Math.min(.28, .26 - (perGame - 1) * .1)), win = Math.min(.97, (perGame - draw) / 3);
+    if (win < .02) { win = .02; draw = Math.max(0, perGame - .06); }
+    win = Math.min(.97, win + .012 * Math.max(0, overall - 88)); draw = Math.min(draw, 1 - win);
+    return { win, draw, ceiling: SEASON.winCeiling };
+  }
+  function fixtureOdds(plan, strength, home) {
+    const raw = plan.win - SEASON.strengthK * (strength - SEASON.meanOpponent) + (home ? SEASON.homeEdge : -SEASON.homeEdge);
+    const win = Math.max(.05, Math.min(plan.ceiling, raw));
+    return { win, draw: Math.min(plan.draw + Math.max(0, raw - win), 1 - win) };
+  }
+  function pickWeighted(list, weight, draw) {
+    const weights = list.map(weight), total = weights.reduce((sum, value) => sum + value, 0);
+    if (!total) return list[Math.min(list.length - 1, Math.floor(draw * list.length))];
+    let left = draw * total;
+    for (let index = 0; index < list.length; index++) if ((left -= weights[index]) <= 0) return list[index];
+    return list.at(-1);
+  }
+  // A manager's results against the computer clubs, decided the way 38-0 decides a season: result first
+  // (from overall, opponent strength and home edge), then a scoreline calibrated to the season's goal totals.
+  function seasonAgainstClubs(own, fixtures, seed) {
+    const random = seeded(seed), count = fixtures.length, scale = count / 38;
+    const plan = basePlan(own.overall), a = own.overall;
+    const expGA = Math.max(20, Math.min(100, 248.8 - 2.53 * a - .8 * (own.defence - a))) * scale;
+    const curve = 57.8 + 3.15 * (a - 80) + .04 * (a - 80) * (a - 80), expGF = Math.max(18, Math.min(90, Math.min(-129 + 2.4 * a, curve) + .8 * (own.attack - a))) * scale;
+    const odds = fixtures.map(fixture => fixtureOdds(plan, fixture.club.strength, fixture.home));
+    const results = odds.map(({ win, draw }) => { const roll = random(); return roll < win ? 'W' : roll < win + draw ? 'D' : 'L'; });
+    const against = { W: .65, D: .9, L: 1.5 }, scored = { W: 1.45, D: .95, L: .55 }, clamp01 = value => Math.max(.6, Math.min(1.4, value));
+    const weaker = fixture => clamp01(1 - .035 * (fixture.club.strength - SEASON.meanOpponent)), stronger = fixture => clamp01(1 + .035 * (fixture.club.strength - SEASON.meanOpponent));
+    const expected = (index, table) => { const { win, draw } = odds[index]; return win * table.W + draw * table.D + Math.max(0, 1 - win - draw) * table.L; };
+    let forScale = fixtures.reduce((sum, fixture, index) => sum + expected(index, scored) * weaker(fixture), 0);
+    let againstScale = fixtures.reduce((sum, fixture, index) => sum + expected(index, against) * stronger(fixture), 0);
+    const targetFor = fixtures.reduce((sum, fixture, index) => sum + expGF * expected(index, scored) * weaker(fixture), 0) / forScale;
+    const targetAgainst = fixtures.reduce((sum, fixture, index) => sum + expGA * expected(index, against) * stronger(fixture), 0) / againstScale;
+    for (let pass = 0; pass < 3; pass++) {
+      let goalsFor = 0, goalsAgainst = 0;
+      fixtures.forEach((fixture, index) => {
+        const { win, draw } = odds[index], loss = Math.max(0, 1 - win - draw), up = weaker(fixture), down = stronger(fixture);
+        const f = value => expGF * value * up / forScale, g = value => expGA * value * down / againstScale, level = Math.sqrt(f(scored.D) * g(against.D));
+        goalsFor += win * f(scored.W) + loss * f(scored.L) + draw * level; goalsAgainst += win * g(against.W) + loss * g(against.L) + draw * level;
+      });
+      forScale *= goalsFor / targetFor; againstScale *= goalsAgainst / targetAgainst;
+    }
+    const draws = mean => { if (mean <= 0) return 0; const threshold = Math.exp(-mean); let count = 0, product = 1; do { count++; product *= random(); } while (product > threshold); return count - 1; };
+    const cap = value => { let goals = value < 9 ? value : 9; while (goals > 5 && random() >= Math.pow(.7, goals - 5)) goals--; return goals; };
+    const tallies = new Map();
+    return fixtures.map((fixture, index) => {
+      const result = results[index], mean = expGF * scored[result] * weaker(fixture) / forScale, conceded = expGA * against[result] * stronger(fixture) / againstScale;
+      let gf, ga;
+      if (result === 'D') gf = ga = cap(draws(Math.sqrt(mean * conceded)));
+      else { gf = cap(draws(mean)); ga = cap(draws(conceded)); }
+      if (result === 'W') { if (gf === 0) { gf = 1; ga = 0; } else if (gf <= ga) ga = gf - 1; }
+      else if (result === 'L') { if (ga <= gf) ga = Math.min(9, gf + 1); if (ga <= gf) gf = ga - 1; }
+      const ours = [], theirs = [];
+      for (let goal = 0; goal < gf; goal++) {
+        const time = goalTime(random()), sub = random();
+        if (sub < SEASON.subShare) {
+          // 38-0 gives about 12% of goals to players picked by role alone, without rating.
+          const scorer = pickWeighted(own.squad, player => (player.position === 'CDM' || player.positions[0] === 'CDM') && (tallies.get(player.id) || 0) >= 10 ? 0 : subWeights[player.position] || 0, sub / SEASON.subShare);
+          tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1); ours.push({ ...time, playerId: scorer.id, name: scorer.name }); continue;
+        }
+        const scorer = pickWeighted(own.squad, player => (player.position === 'CDM' || player.positions[0] === 'CDM') && (tallies.get(player.id) || 0) >= 10 ? 0 : (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4), random());
+        tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1);
+        const assist = pickAssist(own.squad, scorer.id, random);
+        ours.push({ ...time, playerId: scorer.id, name: scorer.name, ...(assist ? { assistId: assist.id, assistName: assist.name } : {}) });
+      }
+      for (let goal = 0; goal < ga; goal++) {
+        const time = goalTime(random()), scorer = pickWeighted(fixture.club.squad, player => (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4), random());
+        theirs.push({ ...time, playerId: scorer.id, name: scorer.name });
+      }
+      separate(ours, theirs);
+      return fixture.home ? { homeGoals: gf, awayGoals: ga, homeScorers: ours, awayScorers: theirs } : { homeGoals: ga, awayGoals: gf, homeScorers: theirs, awayScorers: ours };
+    });
+  }
+  const isManagerTeam = item => !item.club;
+  function create(game, seed = Math.floor(Math.random() * 4294967296), { clubs = [] } = {}) {
     const check = readiness(game);
     if (!check.ready) return { error: check.message };
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) return { error: 'Invalid league seed.' };
-    return { league: { version: 1, engineVersion: VERSION, seed, round: 0, teams: game.managers.map(manager => team(game, manager)), fixtures: schedule(game.managers.map(manager => manager.id)) } };
+    const teams = [...game.managers.map(manager => team(game, manager)), ...clubs.map(club => ({ ...club, club: true, overall: club.strength }))];
+    const league = { version: 1, engineVersion: VERSION, seed, round: 0, competition: clubs.length ? 'premier' : 'friends', teams, fixtures: schedule(teams.map(item => item.id)) };
+    if (clubs.length) league.planned = plan(league);
+    return { league };
   }
+  // Premier League mode: everything not manager-v-manager is decided up front (and kept server-side).
+  function plan(league) {
+    const byId = new Map(league.teams.map(item => [item.id, item])), planned = {};
+    for (const manager of league.teams.filter(isManagerTeam)) {
+      const fixtures = league.fixtures.filter(fixture => (fixture.homeId === manager.id && byId.get(fixture.awayId).club) || (fixture.awayId === manager.id && byId.get(fixture.homeId).club))
+        .map(fixture => ({ fixture, home: fixture.homeId === manager.id, club: byId.get(fixture.homeId === manager.id ? fixture.awayId : fixture.homeId) }));
+      seasonAgainstClubs(manager, fixtures, hash(league.seed, `season:${manager.id}`)).forEach((result, index) => { planned[fixtures[index].fixture.id] = result; });
+    }
+    const tallies = new Map();
+    for (const fixture of league.fixtures) if (byId.get(fixture.homeId).club && byId.get(fixture.awayId).club) planned[fixture.id] = simulateMatch(byId.get(fixture.homeId), byId.get(fixture.awayId), hash(league.seed, fixture.id), tallies);
+    return planned;
+  }
+  const managerDerby = (league, fixture) => { const home = league.teams.find(item => item.id === fixture.homeId), away = league.teams.find(item => item.id === fixture.awayId); return isManagerTeam(home) && isManagerTeam(away); };
+  const nextDerbyRound = league => { const fixture = league.fixtures.find(item => item.round >= league.round && managerDerby(league, item)); return fixture ? fixture.round : null; };
   const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
   function playRound(league) {
     if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
@@ -514,7 +618,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const tallies = new Map();
     for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1);
     const fixtures = league.fixtures.map(fixture => fixture.round !== league.round ? fixture : {
-      ...fixture, result: simulateMatch(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies) });
+      ...fixture, result: league.planned?.[fixture.id] || simulateMatch(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies) });
     return { league: { ...league, fixtures, round: league.round + 1 } };
   }
   function table(league) {
@@ -544,19 +648,20 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return { biggestBuy, bargain, biggestSpender };
   }
   function serialise(league) {
-    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, boards: league.teams.map(team => ({ id: team.id, board: team.board })) } : null;
+    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: team.board })) } : null;
   }
-  function restore(saved, game) {
+  function restore(saved, game, { clubs = [] } = {}) {
     try {
       if (!saved || saved.version !== 1 || !VERSIONS.includes(saved.engineVersion) || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
       if (JSON.stringify(saved.boards) !== JSON.stringify(game.managers.map(manager => ({ id: manager.id, board: manager.board })))) return null;
-      let league = create(game, saved.seed).league;
+      if ((saved.competition || 'friends') !== (clubs.length ? 'premier' : 'friends')) return null;
+      let league = create(game, saved.seed, { clubs }).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
       for (let round = 0; round < saved.round; round++) league = playRound(league).league;
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);
 </script><script>(function (scope) {
@@ -1160,11 +1265,14 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let allFixtures = false, resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
   let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
   const memberName = id => room?.members.find(member => member.managerId === id)?.name || 'Manager';
+  const teamName = id => room?.league?.teams.find(team => team.id === id)?.name || memberName(id);
+  const premier = () => room?.league?.competition === 'premier' || room?.config?.competition === 'premier';
+  const isManager = id => !!room?.game?.managers.some(manager => manager.id === id);
   const entry = id => room?.game?.pool.find(player => player.id === id);
   const rating = player => DraftCore.rating(player, room.game.config.mode);
   const myBudget = () => room?.game ? AuctionCore.budget(room.game, room.me) : 1000;
@@ -1245,7 +1353,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     catch (error) { toast(error.message); }
     finally { busy = false; render(); }
   }
-  function rules(config) { return `<div class="rules stack">${config.devMode ? '<p class="pill green">Dev mode · the auction is skipped and XIs are picked automatically</p>' : ''}<div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>Formation</span><strong>${config.formation === DraftCore.FREE ? 'Free · each manager picks' : esc(config.formation)}</strong></div><p>£1bn each · 11 players each · bids from £1m in whole millions · 60 seconds from the first bid · +10 seconds per new bid · the highest bidder is locked in. The host can change these in the lobby. They lock when the auction starts.</p></div>`; }
+  function rules(config) { return `<div class="rules stack">${config.devMode ? '<p class="pill green">Dev mode · the auction is skipped and XIs are picked automatically</p>' : ''}<div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>League</span><strong>${config.competition === 'premier' ? 'Premier League · 20 teams' : 'Just us · home & away'}</strong></div><div class="row"><span>Formation</span><strong>${config.formation === DraftCore.FREE ? 'Free · each manager picks' : esc(config.formation)}</strong></div><p>£1bn each · 11 players each · bids from £1m in whole millions · 60 seconds from the first bid · +10 seconds per new bid · the highest bidder is locked in. The host can change these in the lobby. They lock when the auction starts.</p></div>`; }
   function home() {
     const code = new URLSearchParams(location.search).get('code') || '';
     return `<div class="hero"><div class="eyebrow">A room. A budget. Your best XI.</div><h1 class="gap-top">Build your team.<br>Beat your mates.</h1><p>A live football auction, straight from your phone. Draft legends, outbid your friends, then play a league together.</p></div>${resumable ? `<section class="panel resume-card"><div><div class="eyebrow">Continue where you left off</div><h2>Room ${esc(resumable.code)}</h2><p>${esc(resumable.label)}</p></div><div class="actions"><button class="primary" data-do="resume" ${disabled(busy)}>Rejoin room →</button><button class="quiet" data-do="forget">Forget it</button></div></section>` : ''}<div class="grid home-panels"><section class="panel stack"><div class="eyebrow">You set the rules</div><h2>Host an auction</h2><p>Choose your player pool, share a four-digit code and get everyone ready.</p><button class="primary" data-do="setup">Create room →</button></section><form id="join-form" class="panel stack"><div class="eyebrow">Got an invite?</div><h2>Join your friends</h2><div class="field"><label for="join-name">Your manager name</label><input id="join-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="join-code">Room code</label><input class="code-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required value="${esc(/^\d{4}$/.test(code) ? code : '')}" placeholder="0000" autocomplete="off"></div><button class="primary" ${disabled(busy)}>Join room →</button></form><p class="wide hint">Each manager needs their own browser or device. Already playing? Use the same browser to rejoin with your saved team. <a href="/offline.html">Play the local version</a>.</p></div>`;
@@ -1253,11 +1361,11 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   // The same rule controls create a room and, for the host, edit it in the lobby.
   function ruleFields(values, minimum = 2) {
     const from = Math.max(0, seasons.indexOf(values.seasonFrom)), to = Math.max(0, seasons.indexOf(values.seasonTo));
-    return `<div class="grid"><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => i + 2).map(count => `<option value="${count}" ${count === values.capacity ? 'selected' : ''} ${count < minimum ? 'disabled' : ''}>${count} managers · ${count * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${[DraftCore.FREE, ...Object.keys(DraftCore.formations)].map(value => `<option value="${esc(value)}" ${value === values.formation ? 'selected' : ''}>${value === DraftCore.FREE ? 'Free (each manager picks)' : esc(value)}</option>`).join('')}</select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak" ${values.mode === 'peak' ? 'selected' : ''}>Peak overall rating</option><option value="season" ${values.mode === 'season' ? 'selected' : ''}>Rating in the selected season</option></select></div></div><div class="slider-grid"><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[from])} – ${esc(seasons[to])}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="${from}"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${to}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">${values.ratingMin} – ${values.ratingMax}</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="${values.ratingMin}"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="${values.ratingMax}"></label></div></div></div><label class="check"><input type="checkbox" name="devMode" ${values.devMode ? 'checked' : ''}><span><strong>Dev mode</strong> · skip the auction. Every manager gets a full XI in the right positions, so you can go straight to the league.</span></label>`;
+    return `<div class="grid"><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => i + 2).map(count => `<option value="${count}" ${count === values.capacity ? 'selected' : ''} ${count < minimum ? 'disabled' : ''}>${count} managers · ${count * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${[DraftCore.FREE, ...Object.keys(DraftCore.formations)].map(value => `<option value="${esc(value)}" ${value === values.formation ? 'selected' : ''}>${value === DraftCore.FREE ? 'Free (each manager picks)' : esc(value)}</option>`).join('')}</select></div><div class="field"><label for="competition">League format</label><select id="competition" name="competition"><option value="friends" ${values.competition !== 'premier' ? 'selected' : ''}>Just us · home &amp; away</option><option value="premier" ${values.competition === 'premier' ? 'selected' : ''}>Premier League · 20 teams with 38-0's clubs</option></select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak" ${values.mode === 'peak' ? 'selected' : ''}>Peak overall rating</option><option value="season" ${values.mode === 'season' ? 'selected' : ''}>Rating in the selected season</option></select></div></div><div class="slider-grid"><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[from])} – ${esc(seasons[to])}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="${from}"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${to}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">${values.ratingMin} – ${values.ratingMax}</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="${values.ratingMin}"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="${values.ratingMax}"></label></div></div></div><label class="check"><input type="checkbox" name="devMode" ${values.devMode ? 'checked' : ''}><span><strong>Dev mode</strong> · skip the auction. Every manager gets a full XI in the right positions, so you can go straight to the league.</span></label>`;
   }
-  const readRules = form => { const data = new FormData(form); return { capacity: +data.get('capacity'), formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on' }; };
-  const ruleKeys = ['capacity', 'formation', 'mode', 'seasonFrom', 'seasonTo', 'ratingMin', 'ratingMax', 'devMode'];
-  const savedRules = () => ({ capacity: room.capacity, ...room.config, devMode: room.config.devMode === true });
+  const readRules = form => { const data = new FormData(form); return { capacity: +data.get('capacity'), formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on', competition: data.get('competition') === 'premier' ? 'premier' : 'friends' }; };
+  const ruleKeys = ['capacity', 'formation', 'mode', 'seasonFrom', 'seasonTo', 'ratingMin', 'ratingMax', 'devMode', 'competition'];
+  const savedRules = () => ({ capacity: room.capacity, ...room.config, devMode: room.config.devMode === true, competition: room.config.competition === 'premier' ? 'premier' : 'friends' });
   const matchesRoom = values => ruleKeys.every(key => values[key] === savedRules()[key]);
   function lobbyRules() {
     if (!room.isHost) return rules(room.config);
@@ -1265,7 +1373,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return `<form id="rules-form" class="stack rules-form"><div class="row"><h2>Room rules</h2>${changed ? '<span class="pill">Unsaved changes</span>' : ''}</div>${ruleFields(values, room.members.length)}<div class="actions"><button class="primary" ${disabled(!changed || !connected || busy)}>Save rules</button>${changed ? '<button type="button" class="quiet" data-do="discard-rules">Discard</button>' : ''}</div><p class="hint">£1bn each · 11 players each · bids from £1m · 60 seconds from the first bid, +10 per bid. Saving new rules asks everyone to ready up again.</p></form>`;
   }
   function setup() {
-    return `<div class="settings stack"><div class="row"><div><div class="eyebrow">Before kick-off</div><h1 class="gap-top">Your auction rules</h1></div><button class="quiet" data-do="home">Back</button></div><form id="create-form" class="panel stack"><div class="field"><label for="host-name">Your manager name</label><input id="host-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div>${ruleFields({ capacity: 3, formation: Object.keys(DraftCore.formations)[0], mode: 'peak', seasonFrom: seasons[0], seasonTo: seasons.at(-1), ratingMin: 40, ratingMax: 95 })}<p class="hint">The server selects a hidden, balanced pool with enough players for the chosen formation, including one goalkeeper per manager. These rules stay fixed for the game.</p><button class="primary" ${disabled(busy)}>Create room & get your code →</button></form></div>`;
+    return `<div class="settings stack"><div class="row"><div><div class="eyebrow">Before kick-off</div><h1 class="gap-top">Your auction rules</h1></div><button class="quiet" data-do="home">Back</button></div><form id="create-form" class="panel stack"><div class="field"><label for="host-name">Your manager name</label><input id="host-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div>${ruleFields({ capacity: 3, competition: 'friends', formation: Object.keys(DraftCore.formations)[0], mode: 'peak', seasonFrom: seasons[0], seasonTo: seasons.at(-1), ratingMin: 40, ratingMax: 95 })}<p class="hint">The server selects a hidden, balanced pool with enough players for the chosen formation, including one goalkeeper per manager. These rules stay fixed for the game.</p><button class="primary" ${disabled(busy)}>Create room & get your code →</button></form></div>`;
   }
   function lobby() {
     const me = room.members.find(member => member.managerId === room.me), allReady = room.members.length === room.capacity && room.members.every(member => member.ready);
@@ -1327,7 +1435,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     }
     return timelines.get(key);
   }
-  const liveFixtures = live => room.league.fixtures.filter(fixture => fixture.round === live.round);
+  const liveFixtures = live => room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))));
   const realSeconds = live => Math.max(0, (clock() - live.startsAt) / 1000);
   const fixtureClock = (live, fixture) => live.view === 'pitch' ? MatchView.clockAt(timelineFor(live, fixture), realSeconds(live)) : liveClock(live);
   const goalsNow = live => liveFixtures(live).reduce((sum, fixture) => { const minute = fixtureClock(live, fixture); return sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length; }, 0);
@@ -1336,20 +1444,20 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const result = fixture.result, upTo = goals => (goals || []).filter(goal => LeagueCore.absoluteMinute(goal) <= minute);
     const home = upTo(result?.homeScorers), away = upTo(result?.awayScorers);
     const list = goals => goals.map(goal => `<li><span class="goal-name">${esc(goal.name)}</span><span class="goal-minute">${LeagueCore.minuteLabel(goal)}</span>${goal.assistName ? `<span class="goal-assist">Assist: ${esc(goal.assistName)}</span>` : ''}</li>`).join('');
-    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${esc(memberName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(memberName(fixture.awayId))}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}</div>`;
+    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${esc(teamName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(teamName(fixture.awayId))}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}</div>`;
   }
   function liveHead(live) {
     const watched = live.view === 'pitch' ? watchedFixture(live) : null, minute = Math.floor(watched ? fixtureClock(live, watched) : liveClock(live)), done = minute >= MatchView.END;
     const score = watched && (side => watched.result[side].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length);
-    return `<div class="row"><div><div class="eyebrow live-label">● Live · Matchday ${live.round + 1}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${done ? 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${done ? 'Full time' : minute < 48 ? 'First half' : 'Second half'}</span></div><div class="live-clock"><span style="width:${minute / MatchView.END * 100}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit home-kit"></i>${esc(memberName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(memberName(watched.awayId))}<i class="kit away-kit"></i></span></div>` : ''}`;
+    return `<div class="row"><div><div class="eyebrow live-label">● Live · Matchday ${live.round + 1}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${done ? 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${done ? 'Full time' : minute < 48 ? 'First half' : 'Second half'}</span></div><div class="live-clock"><span style="width:${minute / MatchView.END * 100}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit home-kit"></i>${esc(teamName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(teamName(watched.awayId))}<i class="kit away-kit"></i></span></div>` : ''}`;
   }
   function liveRest(live) {
     const minute = liveMinute(live), fixtures = liveFixtures(live);
     if (live.view !== 'pitch') return fixtures.map(fixture => fixtureCard(fixture, minute)).join('');
-    const watched = watchedFixture(live), now = fixtureClock(live, watched), teamOf = side => memberName(side === 'home' ? watched.homeId : watched.awayId);
+    const watched = watchedFixture(live), now = fixtureClock(live, watched), teamOf = side => teamName(side === 'home' ? watched.homeId : watched.awayId);
     const ticker = timelineFor(live, watched).events.filter(event => event.abs <= now).slice(-5).reverse()
       .map(event => `<li class="${event.goal ? 'goal-event' : ''}"><span class="goal-minute">${clockLabel(Math.min(MatchView.END, Math.round(event.abs)))}</span><span>${esc(event.text)}${event.assist ? ` · assist ${esc(event.assist)}` : ''}${event.side ? ` <small>${esc(teamOf(event.side))}</small>` : ''}</span></li>`).join('');
-    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(memberName(fixture.homeId))} v ${esc(memberName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, Math.floor(fixtureClock(live, fixture)))).join('')}`;
+    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(teamName(fixture.homeId))} v ${esc(teamName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, Math.floor(fixtureClock(live, fixture)))).join('')}`;
   }
   function liveInner(live) {
     return `<div id="live-head">${liveHead(live)}</div>${live.view === 'pitch' ? '<canvas id="match-canvas" class="match-canvas" role="img" aria-label="Live 2D match view"></canvas>' : ''}<div id="live-rest">${liveRest(live)}</div>`;
@@ -1376,7 +1484,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) { const value = scorers.get(scorer.playerId) || { name: scorer.name, managerId: fixture.result.homeScorers.includes(scorer) ? fixture.homeId : fixture.awayId, goals: 0 }; value.goals++; scorers.set(scorer.playerId, value); }
     return [...scorers.values()].sort((a, b) => b.goals - a.goals);
   }
-  const standings = rows => `<div class="scroll-table"><table><thead><tr><th>#</th><th>Manager</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>${rows.map((row, i) => `<tr><td>${i + 1}</td><td>${esc(row.name)}</td>${['played', 'won', 'drawn', 'lost', 'gf', 'ga', 'gd'].map(key => `<td>${row[key]}</td>`).join('')}<td class="points">${row.points}</td></tr>`).join('')}</tbody></table></div>`;
+  const standings = rows => `<div class="scroll-table"><table><thead><tr><th>#</th><th>${premier() ? 'Team' : 'Manager'}</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>${rows.map((row, i) => `<tr class="${premier() && isManager(row.id) ? 'manager-row' : ''}"><td>${i + 1}</td><td>${esc(row.name)}</td>${['played', 'won', 'drawn', 'lost', 'gf', 'ga', 'gd'].map(key => `<td>${row[key]}</td>`).join('')}<td class="points">${row.points}</td></tr>`).join('')}</tbody></table></div>`;
   function summaryScreen() {
     const game = room.game, league = room.league, rows = LeagueCore.table(league), awards = LeagueCore.awards(game), top = rows[0];
     const champions = rows.filter(row => row.points === top.points && row.gd === top.gd && row.gf === top.gf);
@@ -1385,24 +1493,25 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const biggest = played.slice().sort((a, b) => margin(b) - margin(a) || total(b) - total(a))[0];
     const boot = goldenBoot(league), next = room.next;
     const stat = (label, value, note) => `<div class="summary-stat"><small>${label}</small><strong>${value}</strong>${note ? `<span>${note}</span>` : ''}</div>`;
-    const teams = rows.map((row, index) => {
+    const managerRows = rows.map((row, index) => ({ row, index })).filter(item => isManager(item.row.id));
+    const teams = managerRows.map(({ row, index }) => {
       const team = league.teams.find(team => team.id === row.id), sales = AuctionCore.purchases(game, row.id);
       const priciest = sales.slice().sort((a, b) => b.price - a.price)[0], star = sales.map(sale => entry(sale.playerId)).sort((a, b) => rating(b) - rating(a))[0];
       return `<div class="summary-team"><span class="queue-number">${index + 1}</span><div class="grow"><strong>${esc(row.name)}${champions.includes(row) ? ' 🏆' : ''}</strong><small>${row.points} pts · ${row.won}W ${row.drawn}D ${row.lost}L · ${row.gf} scored · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} team rating` : ''}</small><small>Top signing: ${esc(entry(priciest.playerId).player.name)} (${money(priciest.price)})${showRatings ? ` · Best player: ${esc(star.player.name)} (${rating(star)})` : ''}</small></div></div>`;
     }).join('');
-    return `<div class="stack"><section class="panel stack summary-hero"><div class="eyebrow">Full time · Season complete</div><h2>${champions.map(row => esc(row.name)).join(' & ')} ${champions.length > 1 ? 'are joint champions!' : 'are champions!'}</h2><p>${top.points} points from ${top.played} games · ${top.won} wins · ${top.gf} goals</p><div class="summary-stats">${stat('Goals this season', goals, `${(goals / Math.max(1, played.length)).toFixed(1)} per game`)}${biggest ? stat('Biggest win', `${biggest.result.homeGoals} – ${biggest.result.awayGoals}`, `${esc(memberName(biggest.homeId))} v ${esc(memberName(biggest.awayId))}`) : ''}${boot.length ? stat('Golden boot', esc(boot[0].name), `${boot[0].goals} goals · ${esc(memberName(boot[0].managerId))}`) : ''}${topAssists(league).length ? stat('Most assists', esc(topAssists(league)[0].name), `${topAssists(league)[0].assists} assists · ${esc(memberName(topAssists(league)[0].managerId))}`) : ''}${stat('Players signed', game.sales.length, `${money(game.sales.reduce((sum, sale) => sum + sale.price, 0))} spent in total`)}</div><div class="actions">${next ? `<button class="primary" data-do="rematch" ${disabled(busy)}>Join the new game · room ${esc(next.code)} →</button>` : `<button class="primary" data-do="rematch" ${disabled(busy)}>Play again · same rules →</button>`}<button class="quiet" data-do="leave">Leave the room</button></div><p class="hint">${next ? 'A fresh lobby with the same rules is waiting for you.' : 'Play again opens a fresh lobby with a new code and the same rules. Everyone else can join it from this screen.'}</p></section><section class="panel stack"><h2>Final table</h2>${standings(rows)}</section><section class="panel stack"><h2>How every team did</h2>${teams}</section>${awardsReport(awards)}</div>`;
+    return `<div class="stack"><section class="panel stack summary-hero"><div class="eyebrow">Full time · Season complete</div><h2>${champions.map(row => esc(row.name)).join(' & ')} ${champions.length > 1 ? 'are joint champions!' : isManager(top.id) || !premier() ? 'are champions!' : 'win the league'}</h2>${premier() && !isManager(top.id) ? `<p>Best of the managers: <strong>${esc(managerRows[0].row.name)}</strong> in ${managerRows[0].index + 1}${['st', 'nd', 'rd'][managerRows[0].index] || 'th'} place.</p>` : ''}<p>${top.points} points from ${top.played} games · ${top.won} wins · ${top.gf} goals</p><div class="summary-stats">${stat('Goals this season', goals, `${(goals / Math.max(1, played.length)).toFixed(1)} per game`)}${biggest ? stat('Biggest win', `${biggest.result.homeGoals} – ${biggest.result.awayGoals}`, `${esc(teamName(biggest.homeId))} v ${esc(teamName(biggest.awayId))}`) : ''}${boot.length ? stat('Golden boot', esc(boot[0].name), `${boot[0].goals} goals · ${esc(teamName(boot[0].managerId))}`) : ''}${topAssists(league).length ? stat('Most assists', esc(topAssists(league)[0].name), `${topAssists(league)[0].assists} assists · ${esc(teamName(topAssists(league)[0].managerId))}`) : ''}${stat('Players signed', game.sales.length, `${money(game.sales.reduce((sum, sale) => sum + sale.price, 0))} spent in total`)}</div><div class="actions">${next ? `<button class="primary" data-do="rematch" ${disabled(busy)}>Join the new game · room ${esc(next.code)} →</button>` : `<button class="primary" data-do="rematch" ${disabled(busy)}>Play again · same rules →</button>`}<button class="quiet" data-do="leave">Leave the room</button></div><p class="hint">${next ? 'A fresh lobby with the same rules is waiting for you.' : 'Play again opens a fresh lobby with a new code and the same rules. Everyone else can join it from this screen.'}</p></section><section class="panel stack"><h2>Final table</h2>${standings(rows)}</section><section class="panel stack"><h2>How every team did</h2>${teams}</section>${awardsReport(awards)}</div>`;
   }
   function leagueScreen() {
     const game = room.game;
     if (room.status !== 'complete') return `<section class="panel stack"><div class="eyebrow">After the auction</div><h2>Your league is coming</h2><p>Once all ${game.totalPlayers} players are signed, we’ll reveal the bargains and big spends. Arrange every XI, then everyone plays each other home and away.</p><button data-do="tab" data-id="auction">Back to the auction</button></section>`;
     const awards = LeagueCore.awards(game), check = LeagueCore.readiness(game), league = room.league, count = league ? LeagueCore.roundCount(league) : 0;
     const report = awardsReport(awards);
-    if (!league) return `<div class="stack">${report}<section class="panel stack"><h2>Meet the teams</h2>${game.managers.map(manager => { const team = LeagueCore.team(game, manager); return `<div class="sale-row"><div><strong>${esc(manager.name)}</strong><small>${team.placed}/11 placed · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} overall` : ''}</small></div><button data-do="team" data-id="${manager.id}">View XI</button></div>`; }).join('')}<p>${esc(check.message)}</p>${room.isHost ? `<button class="primary" data-do="startLeague" ${disabled(!check.ready || !connected || busy)}>Start the home & away league →</button>` : '<p class="hint">The host will start once everyone has placed their XI.</p>'}</section></div>`;
+    if (!league) return `<div class="stack">${report}<section class="panel stack"><h2>Meet the teams</h2>${game.managers.map(manager => { const team = LeagueCore.team(game, manager); return `<div class="sale-row"><div><strong>${esc(manager.name)}</strong><small>${team.placed}/11 placed · ${money(team.spent)} spent${showRatings ? ` · ${team.overall} overall` : ''}</small></div><button data-do="team" data-id="${manager.id}">View XI</button></div>`; }).join('')}<p>${esc(check.message)}</p>${premier() ? `<p class="hint">Premier League: your ${game.managers.length} XIs join ${20 - game.managers.length} of 38-0's clubs for 38 matchdays. Games against the clubs are instant; manager v manager games are played live.</p>` : ''}${room.isHost ? `<button class="primary" data-do="startLeague" ${disabled(!check.ready || !connected || busy)}>Start the home & away league →</button>` : '<p class="hint">The host will start once everyone has placed their XI.</p>'}</section></div>`;
     // While a matchday is live, the table and results wait for full time.
     const live = liveNow(), shown = live ? { ...league, round: live.round, fixtures: league.fixtures.map(fixture => fixture.round === live.round ? { ...fixture, result: null } : fixture) } : league;
     const finished = !live && league.round >= count, rows = LeagueCore.table(shown);
     const scorers = goldenBoot(shown);
-    return `<div class="stack">${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.isHost ? `${matchViewControl()}<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button><button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>` : ''}</section><section class="panel stack"><h2>Fixtures & results</h2>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goal${scorer.goals === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}${topAssists(shown).length ? `<section class="panel stack"><h2>Most assists</h2>${topAssists(shown).slice(0, 10).map(player => `<div class="sale-row"><strong>${esc(player.name)}</strong><span class="price">${player.assists} assist${player.assists === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
+    return `<div class="stack">${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.isHost ? `${matchViewControl()}<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button>${premier() && room.league.nextDerby !== null && room.league.nextDerby > room.league.round ? `<button data-do="skipToDerby" ${disabled(!connected || busy || !!live)}>Skip to the next manager match · matchday ${room.league.nextDerby + 1}</button>` : ''}<button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>` : ''}</section><section class="panel stack"><div class="row"><h2>Fixtures & results</h2>${premier() ? `<button class="quiet" data-do="all-fixtures">${allFixtures ? 'Only manager games' : 'Every game'}</button>` : ''}</div>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round && (!premier() || allFixtures || isManager(fixture.homeId) || isManager(fixture.awayId))).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goal${scorer.goals === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}${topAssists(shown).length ? `<section class="panel stack"><h2>Most assists</h2>${topAssists(shown).slice(0, 10).map(player => `<div class="sale-row"><strong>${esc(player.name)}</strong><span class="price">${player.assists} assist${player.assists === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
   }
   function render() {
     const focus = document.activeElement, focusId = focus?.id, value = focus && ['INPUT', 'SELECT'].includes(focus.tagName) ? focus.value : null;
@@ -1482,7 +1591,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const data = new FormData(form), displayName = String(data.get('name') || '').trim(); storage.set('name', displayName);
     let body;
     if (form.id === 'join-form') body = { name: displayName, code: String(data.get('code') || '') };
-    else if (form.id === 'create-form') body = { name: displayName, capacity: +data.get('capacity'), config: { formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on' } };
+    else if (form.id === 'create-form') body = { name: displayName, capacity: +data.get('capacity'), config: { formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on', competition: data.get('competition') === 'premier' ? 'premier' : 'friends' } };
     else return;
     busy = true; form.querySelector('button[type=submit],button:not([type])').disabled = true;
     try { await api(form.id === 'join-form' ? '/api/join' : '/api/create', body); connect(); }
@@ -1518,6 +1627,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       return;
     }
     if (type === 'leave') { leaveRoom(); render(); return; }
+    if (type === 'all-fixtures') { allFixtures = !allFixtures; render(); return; }
     if (type === 'resume' && resumable) { const id = resumable.id; busy = true; render(); try { await api(`/api/room/${id}`); connect(); } catch (error) { toast(error.message); storage.set('room', null); resumable = null; } finally { busy = false; render(); } return; }
     if (type === 'forget') { storage.set('room', null); resumable = null; render(); return; }
     if (type === 'discard-rules') { rulesDraft = null; render(); return; }

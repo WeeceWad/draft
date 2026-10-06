@@ -58,6 +58,36 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   assert.deepEqual(free.league.teams.map(team => team.formation), ['4-3-3', '3-5-2', '5-3-2']);
   assert.throws(() => command(free, 'b', 'formation', { formation: '4-4-2' }), /locked/);
 }
+// Premier League mode: the managers join 38-0's clubs in a 20-team, 38-matchday league.
+{
+  let pl = lobby();
+  pl = command(pl, 'a', 'settings', { capacity: 3, config: { ...config, devMode: true, competition: 'premier' } });
+  pl.members.forEach(member => { pl = command(pl, member.uid, 'ready', { ready: true }); });
+  pl = command(pl, 'a', 'start'); pl = command(pl, 'a', 'startLeague');
+  assert.equal(pl.league.teams.length, 20); assert.equal(pl.league.fixtures.length, 380); assert.equal(league.roundCount(pl.league), 38);
+  const clubs = pl.league.teams.filter(team => team.club);
+  assert.equal(clubs.length, 17); assert.equal(clubs[0].name, 'Manchester City'); assert(clubs.every(club => club.squad.length === 11));
+  const drafted = new Set(pl.game.pool.map(entry => entry.id));
+  assert(clubs.every(club => club.squad.every(player => !drafted.has(player.id))), 'Club squads never include drafted players');
+  const shown = engine.view(pl, 'b');
+  assert.equal(shown.league.planned, undefined, 'Future results stay on the server');
+  assert(shown.league.fixtures.every(fixture => !fixture.result));
+  const derbyRound = league.nextDerbyRound(pl.league);
+  if (derbyRound > 0) {
+    pl = command(pl, 'a', 'playRound'); assert.equal(pl.live, null, 'Matchdays without a manager match are instant');
+    if (pl.league.round < derbyRound) pl = command(pl, 'a', 'skipToDerby');
+    assert.equal(pl.league.round, derbyRound);
+  }
+  assert.throws(() => command(pl, 'a', 'skipToDerby'), /Play it live/);
+  pl = command(pl, 'a', 'playRound'); assert(pl.live, 'Manager matches play live');
+  assert.equal(engine.unpack(engine.pack(pl)).league.fixtures.filter(fixture => fixture.result).length, pl.league.fixtures.filter(fixture => fixture.result).length);
+  assert.deepEqual(engine.unpack(engine.pack(pl)).league.fixtures, pl.league.fixtures, 'Premier League seasons replay exactly');
+  time = pl.live.endsAt; pl = command(pl, 'a', 'finishLeague');
+  const table = league.table(pl.league);
+  assert.equal(table.length, 20); assert(table.every(row => row.played === 38));
+  assert.equal(table.reduce((sum, row) => sum + row.won, 0), table.reduce((sum, row) => sum + row.lost, 0));
+  assert(engine.finished(pl));
+}
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
 assert.throws(() => command(room, 'b', 'formation', { formation: '3-5-2' }), /fixed formation/);

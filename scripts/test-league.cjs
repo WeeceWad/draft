@@ -59,6 +59,23 @@ for (const formation of ['4-3-3', '3-5-2', '5-3-2']) {
 }
 assert(Math.abs(assisted / goalCount - .72) < .04, `About 72% of goals are assisted (${assisted}/${goalCount})`);
 assert.equal(core.minuteLabel({ minute: 90, stoppage: 3 }), '90+3′');
+// Premier League mode reproduces 38-0's season engine: simulated points match its expected points.
+{
+  const field = [['Manchester City', 88], ['Arsenal', 86], ['Liverpool', 86], ['Chelsea', 84], ['Manchester United', 84], ['Tottenham', 83], ['Newcastle', 82], ['Aston Villa', 81], ['Brighton', 80], ['West Ham', 79], ['Crystal Palace', 78], ['Everton', 77], ['Leeds United', 77], ['Wolves', 77], ['Brentford', 77], ['Fulham', 77], ['Bournemouth', 76], ['Nottm Forest', 76], ['Burnley', 74]]
+    .map(([name, strength]) => ({ name, strength, squad: [{ id: name, name, position: 'ST', positions: ['ST'], rating: strength }] }));
+  const fixtures = field.flatMap((club, index) => [{ club, home: index % 2 === 0 }, { club, home: index % 2 === 1 }]);
+  for (const [overall, expected] of [[75, 42.3], [80, 59.3], [85, 76.7], [90, 94.6]]) {
+    const own = { overall, attack: overall, defence: overall, squad: ['GK', 'CB', 'CM', 'ST'].map((position, index) => ({ id: `p${index}`, name: `P${index}`, position, positions: [position], rating: overall })) };
+    const plan = core.basePlan(overall), model = fixtures.reduce((sum, item) => { const odds = core.fixtureOdds(plan, item.club.strength, item.home); return sum + 3 * odds.win + odds.draw; }, 0);
+    assert(Math.abs(model - expected) < .1, `38-0 model points for ${overall}`);
+    let points = 0;
+    for (let seed = 0; seed < 300; seed++) core.seasonAgainstClubs(own, fixtures, seed * 7919 + 3).forEach((result, index) => {
+      const ours = fixtures[index].home ? result.homeGoals : result.awayGoals, theirs = fixtures[index].home ? result.awayGoals : result.homeGoals;
+      points += ours > theirs ? 3 : ours === theirs ? 1 : 0;
+    });
+    assert(Math.abs(points / 300 - expected) < 1.5, `Simulated season points for ${overall}: ${points / 300}`);
+  }
+}
 assert(Math.abs(core.expectedGoals(80, 80, true) - 1.7) < 1e-10);
 assert.equal(core.expectedGoals(80, 80, false), 1.35);
 let strongWins = 0, weakWins = 0, homeGoals = 0, awayGoals = 0;

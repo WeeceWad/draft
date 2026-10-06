@@ -36,6 +36,7 @@ The hosted game is at `/`, and the original shared-device game is at `/offline.h
 
 ## Online auction rules
 
+- **League format**: "Just us" (managers play each other home and away) or **Premier League** (the managers join 38-0's clubs in a 20-team, 38-matchday season; games against clubs are instant, manager v manager games play live, and the host can skip ahead to the next manager match).
 - Host selects 2–8 managers, formation (or **Free**, where each manager picks their own formation on the Teams screen until the league starts), peak/season rating mode, season range and rating range. The host can change any of these in the lobby under **Room rules**; saving new rules asks everyone to ready up again. The rules lock when the auction starts.
 - Squad lists are grouped by main position: goalkeeper, defence, midfield, attack.
 - **Dev mode** (a Room rules switch, for testing): starting skips the auction. Every manager gets a full XI from the balanced pool, each player placed in a position they play, with a nominal fee by rating. Everyone lands on the League tab ready to start.

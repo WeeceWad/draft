@@ -158,12 +158,115 @@
     separate(homeScorers, awayScorers);
     return { homeGoals, awayGoals, homeXg, awayXg, homeScorers, awayScorers };
   }
-  function create(game, seed = Math.floor(Math.random() * 4294967296)) {
+  // 38-0's season engine (simulateSeason), fitted on its 480 historical club-seasons. These are the
+  // values its buildSeasonModel derives: expected points from overall, then win/draw odds per fixture.
+  const SEASON = { intercept: -219.30241993531556, slope: 3.4879501664022547, minOverall: 68, meanOpponent: 80, homeEdge: .05, strengthK: .035, winCeiling: .92, subShare: .12 };
+  const subWeights = { GK: 0, LB: 3, CB: 2, RB: 3, LWB: 3, RWB: 3, CDM: 5, CM: 11, CAM: 13, LM: 12, RM: 12, LW: 12, RW: 12, ST: 6 };
+  function targetPoints(overall) {
+    const fitted = SEASON.intercept + SEASON.slope * overall, floor = SEASON.intercept + SEASON.slope * SEASON.minOverall;
+    if (fitted >= floor) return Math.min(110, fitted);
+    const span = floor - 8;
+    return 8 + span * Math.exp((fitted - floor) / span);
+  }
+  function basePlan(overall) {
+    const perGame = targetPoints(overall) / 38;
+    let draw = Math.max(.05, Math.min(.28, .26 - (perGame - 1) * .1)), win = Math.min(.97, (perGame - draw) / 3);
+    if (win < .02) { win = .02; draw = Math.max(0, perGame - .06); }
+    win = Math.min(.97, win + .012 * Math.max(0, overall - 88)); draw = Math.min(draw, 1 - win);
+    return { win, draw, ceiling: SEASON.winCeiling };
+  }
+  function fixtureOdds(plan, strength, home) {
+    const raw = plan.win - SEASON.strengthK * (strength - SEASON.meanOpponent) + (home ? SEASON.homeEdge : -SEASON.homeEdge);
+    const win = Math.max(.05, Math.min(plan.ceiling, raw));
+    return { win, draw: Math.min(plan.draw + Math.max(0, raw - win), 1 - win) };
+  }
+  function pickWeighted(list, weight, draw) {
+    const weights = list.map(weight), total = weights.reduce((sum, value) => sum + value, 0);
+    if (!total) return list[Math.min(list.length - 1, Math.floor(draw * list.length))];
+    let left = draw * total;
+    for (let index = 0; index < list.length; index++) if ((left -= weights[index]) <= 0) return list[index];
+    return list.at(-1);
+  }
+  // A manager's results against the computer clubs, decided the way 38-0 decides a season: result first
+  // (from overall, opponent strength and home edge), then a scoreline calibrated to the season's goal totals.
+  function seasonAgainstClubs(own, fixtures, seed) {
+    const random = seeded(seed), count = fixtures.length, scale = count / 38;
+    const plan = basePlan(own.overall), a = own.overall;
+    const expGA = Math.max(20, Math.min(100, 248.8 - 2.53 * a - .8 * (own.defence - a))) * scale;
+    const curve = 57.8 + 3.15 * (a - 80) + .04 * (a - 80) * (a - 80), expGF = Math.max(18, Math.min(90, Math.min(-129 + 2.4 * a, curve) + .8 * (own.attack - a))) * scale;
+    const odds = fixtures.map(fixture => fixtureOdds(plan, fixture.club.strength, fixture.home));
+    const results = odds.map(({ win, draw }) => { const roll = random(); return roll < win ? 'W' : roll < win + draw ? 'D' : 'L'; });
+    const against = { W: .65, D: .9, L: 1.5 }, scored = { W: 1.45, D: .95, L: .55 }, clamp01 = value => Math.max(.6, Math.min(1.4, value));
+    const weaker = fixture => clamp01(1 - .035 * (fixture.club.strength - SEASON.meanOpponent)), stronger = fixture => clamp01(1 + .035 * (fixture.club.strength - SEASON.meanOpponent));
+    const expected = (index, table) => { const { win, draw } = odds[index]; return win * table.W + draw * table.D + Math.max(0, 1 - win - draw) * table.L; };
+    let forScale = fixtures.reduce((sum, fixture, index) => sum + expected(index, scored) * weaker(fixture), 0);
+    let againstScale = fixtures.reduce((sum, fixture, index) => sum + expected(index, against) * stronger(fixture), 0);
+    const targetFor = fixtures.reduce((sum, fixture, index) => sum + expGF * expected(index, scored) * weaker(fixture), 0) / forScale;
+    const targetAgainst = fixtures.reduce((sum, fixture, index) => sum + expGA * expected(index, against) * stronger(fixture), 0) / againstScale;
+    for (let pass = 0; pass < 3; pass++) {
+      let goalsFor = 0, goalsAgainst = 0;
+      fixtures.forEach((fixture, index) => {
+        const { win, draw } = odds[index], loss = Math.max(0, 1 - win - draw), up = weaker(fixture), down = stronger(fixture);
+        const f = value => expGF * value * up / forScale, g = value => expGA * value * down / againstScale, level = Math.sqrt(f(scored.D) * g(against.D));
+        goalsFor += win * f(scored.W) + loss * f(scored.L) + draw * level; goalsAgainst += win * g(against.W) + loss * g(against.L) + draw * level;
+      });
+      forScale *= goalsFor / targetFor; againstScale *= goalsAgainst / targetAgainst;
+    }
+    const draws = mean => { if (mean <= 0) return 0; const threshold = Math.exp(-mean); let count = 0, product = 1; do { count++; product *= random(); } while (product > threshold); return count - 1; };
+    const cap = value => { let goals = value < 9 ? value : 9; while (goals > 5 && random() >= Math.pow(.7, goals - 5)) goals--; return goals; };
+    const tallies = new Map();
+    return fixtures.map((fixture, index) => {
+      const result = results[index], mean = expGF * scored[result] * weaker(fixture) / forScale, conceded = expGA * against[result] * stronger(fixture) / againstScale;
+      let gf, ga;
+      if (result === 'D') gf = ga = cap(draws(Math.sqrt(mean * conceded)));
+      else { gf = cap(draws(mean)); ga = cap(draws(conceded)); }
+      if (result === 'W') { if (gf === 0) { gf = 1; ga = 0; } else if (gf <= ga) ga = gf - 1; }
+      else if (result === 'L') { if (ga <= gf) ga = Math.min(9, gf + 1); if (ga <= gf) gf = ga - 1; }
+      const ours = [], theirs = [];
+      for (let goal = 0; goal < gf; goal++) {
+        const time = goalTime(random()), sub = random();
+        if (sub < SEASON.subShare) {
+          // 38-0 gives about 12% of goals to players picked by role alone, without rating.
+          const scorer = pickWeighted(own.squad, player => (player.position === 'CDM' || player.positions[0] === 'CDM') && (tallies.get(player.id) || 0) >= 10 ? 0 : subWeights[player.position] || 0, sub / SEASON.subShare);
+          tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1); ours.push({ ...time, playerId: scorer.id, name: scorer.name }); continue;
+        }
+        const scorer = pickWeighted(own.squad, player => (player.position === 'CDM' || player.positions[0] === 'CDM') && (tallies.get(player.id) || 0) >= 10 ? 0 : (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4), random());
+        tallies.set(scorer.id, (tallies.get(scorer.id) || 0) + 1);
+        const assist = pickAssist(own.squad, scorer.id, random);
+        ours.push({ ...time, playerId: scorer.id, name: scorer.name, ...(assist ? { assistId: assist.id, assistName: assist.name } : {}) });
+      }
+      for (let goal = 0; goal < ga; goal++) {
+        const time = goalTime(random()), scorer = pickWeighted(fixture.club.squad, player => (scorerWeights[player.position] || 0) * Math.pow(Math.max(40, player.rating) / 80, defensive.has(player.position) ? 1 : 4), random());
+        theirs.push({ ...time, playerId: scorer.id, name: scorer.name });
+      }
+      separate(ours, theirs);
+      return fixture.home ? { homeGoals: gf, awayGoals: ga, homeScorers: ours, awayScorers: theirs } : { homeGoals: ga, awayGoals: gf, homeScorers: theirs, awayScorers: ours };
+    });
+  }
+  const isManagerTeam = item => !item.club;
+  function create(game, seed = Math.floor(Math.random() * 4294967296), { clubs = [] } = {}) {
     const check = readiness(game);
     if (!check.ready) return { error: check.message };
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) return { error: 'Invalid league seed.' };
-    return { league: { version: 1, engineVersion: VERSION, seed, round: 0, teams: game.managers.map(manager => team(game, manager)), fixtures: schedule(game.managers.map(manager => manager.id)) } };
+    const teams = [...game.managers.map(manager => team(game, manager)), ...clubs.map(club => ({ ...club, club: true, overall: club.strength }))];
+    const league = { version: 1, engineVersion: VERSION, seed, round: 0, competition: clubs.length ? 'premier' : 'friends', teams, fixtures: schedule(teams.map(item => item.id)) };
+    if (clubs.length) league.planned = plan(league);
+    return { league };
   }
+  // Premier League mode: everything not manager-v-manager is decided up front (and kept server-side).
+  function plan(league) {
+    const byId = new Map(league.teams.map(item => [item.id, item])), planned = {};
+    for (const manager of league.teams.filter(isManagerTeam)) {
+      const fixtures = league.fixtures.filter(fixture => (fixture.homeId === manager.id && byId.get(fixture.awayId).club) || (fixture.awayId === manager.id && byId.get(fixture.homeId).club))
+        .map(fixture => ({ fixture, home: fixture.homeId === manager.id, club: byId.get(fixture.homeId === manager.id ? fixture.awayId : fixture.homeId) }));
+      seasonAgainstClubs(manager, fixtures, hash(league.seed, `season:${manager.id}`)).forEach((result, index) => { planned[fixtures[index].fixture.id] = result; });
+    }
+    const tallies = new Map();
+    for (const fixture of league.fixtures) if (byId.get(fixture.homeId).club && byId.get(fixture.awayId).club) planned[fixture.id] = simulateMatch(byId.get(fixture.homeId), byId.get(fixture.awayId), hash(league.seed, fixture.id), tallies);
+    return planned;
+  }
+  const managerDerby = (league, fixture) => { const home = league.teams.find(item => item.id === fixture.homeId), away = league.teams.find(item => item.id === fixture.awayId); return isManagerTeam(home) && isManagerTeam(away); };
+  const nextDerbyRound = league => { const fixture = league.fixtures.find(item => item.round >= league.round && managerDerby(league, item)); return fixture ? fixture.round : null; };
   const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
   function playRound(league) {
     if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
@@ -171,7 +274,7 @@
     const tallies = new Map();
     for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1);
     const fixtures = league.fixtures.map(fixture => fixture.round !== league.round ? fixture : {
-      ...fixture, result: simulateMatch(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies) });
+      ...fixture, result: league.planned?.[fixture.id] || simulateMatch(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies) });
     return { league: { ...league, fixtures, round: league.round + 1 } };
   }
   function table(league) {
@@ -201,18 +304,19 @@
     return { biggestBuy, bargain, biggestSpender };
   }
   function serialise(league) {
-    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, boards: league.teams.map(team => ({ id: team.id, board: team.board })) } : null;
+    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: team.board })) } : null;
   }
-  function restore(saved, game) {
+  function restore(saved, game, { clubs = [] } = {}) {
     try {
       if (!saved || saved.version !== 1 || !VERSIONS.includes(saved.engineVersion) || !readiness(game).ready || !Number.isInteger(saved.round)) return null;
       if (JSON.stringify(saved.boards) !== JSON.stringify(game.managers.map(manager => ({ id: manager.id, board: manager.board })))) return null;
-      let league = create(game, saved.seed).league;
+      if ((saved.competition || 'friends') !== (clubs.length ? 'premier' : 'friends')) return null;
+      let league = create(game, saved.seed, { clubs }).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
       for (let round = 0; round < saved.round; round++) league = playRound(league).league;
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);

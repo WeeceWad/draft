@@ -5,6 +5,35 @@ const players = require('../data/38-0/players.json');
 const clubs = require('../data/38-0/clubs.json');
 const clubMap = new Map(clubs.map(club => [club.id, club]));
 const seasons = [...new Set(players.flatMap(player => player.clubSeasons.map(season => season.season)))].sort();
+// 38-0's Premier League field: its 19 opponent clubs and their strengths (Leicester City is its stand-in).
+const FIELD = [['Manchester City', 88, 'manchester-city'], ['Arsenal', 86, 'arsenal'], ['Liverpool', 86, 'liverpool'], ['Chelsea', 84, 'chelsea'], ['Manchester United', 84, 'manchester-united'], ['Tottenham', 83, 'tottenham'], ['Newcastle', 82, 'newcastle'], ['Aston Villa', 81, 'aston-villa'], ['Brighton', 80, 'brighton'], ['West Ham', 79, 'west-ham'], ['Crystal Palace', 78, 'crystal-palace'], ['Everton', 77, 'everton'], ['Leeds United', 77, 'leeds'], ['Wolves', 77, 'wolves'], ['Brentford', 77, 'brentford'], ['Fulham', 77, 'fulham'], ['Bournemouth', 76, 'bournemouth'], ['Nottm Forest', 76, 'nottm-forest'], ['Burnley', 74, 'burnley']];
+// The strongest clubs fill the places the managers leave in a 20-team league. Each fields its latest
+// squad from our data as a 4-3-3, without anyone the managers drafted.
+const clubCache = new Map();
+function premierClubs(game) {
+  const key = `${game.managers.length}:${game.pool.map(entry => entry.id).join(',')}`;
+  if (!clubCache.has(key)) { if (clubCache.size > 50) clubCache.clear(); clubCache.set(key, buildClubs(game)); }
+  return clubCache.get(key);
+}
+function buildClubs(game) {
+  const taken = new Set(game.pool.map(entry => entry.id)), slots = draft.formations['4-3-3'];
+  return FIELD.slice(0, 20 - game.managers.length).map(([name, strength, clubId]) => {
+    const counts = new Map();
+    for (const player of players) for (const season of player.clubSeasons) if (season.clubId === clubId) counts.set(season.season, (counts.get(season.season) || 0) + 1);
+    const latest = [...counts.keys()].sort().reverse().find(season => counts.get(season) >= 14);
+    const options = players.filter(player => !taken.has(player.id)).flatMap(player => { const season = player.clubSeasons.find(item => item.clubId === clubId && item.season === latest); return season ? [{ player, rating: season.seasonRating }] : []; }).sort((a, b) => b.rating - a.rating || a.player.id.localeCompare(b.player.id));
+    const used = new Set();
+    const squad = slots.map(slot => {
+      const pick = options.find(option => !used.has(option.player.id) && (slot.position === 'GK' ? option.player.positions.includes('GK') : !option.player.positions.includes('GK') && draft.fits(option.player, slot.position)))
+        || options.find(option => !used.has(option.player.id) && (slot.position === 'GK') === option.player.positions.includes('GK'));
+      if (!pick) return null;
+      used.add(pick.player.id);
+      return { id: pick.player.id, name: pick.player.name, position: slot.position, positions: pick.player.positions.slice(), rating: pick.rating };
+    }).filter(Boolean);
+    return { id: `club:${clubId}`, name, strength, season: latest, squad };
+  });
+}
+const clubsFor = room => room.config.competition === 'premier' && room.game ? premierClubs(room.game) : [];
 class RoomError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 const fail = (message, status) => { throw new RoomError(message, status); };
 function name(value) {
@@ -14,7 +43,7 @@ function name(value) {
 function settings(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) fail('Choose between 2 and 8 managers.');
   const config = { managerCount: capacity, names: Array.from({ length: capacity }, (_, i) => `Manager ${i + 1}`), formation: input.formation,
-    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true };
+    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
   if (!draft.poolShape(config.formation) || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
     || config.seasonFrom > config.seasonTo || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax)
     || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax) fail('Choose valid formation, seasons and ratings.');
@@ -38,7 +67,7 @@ function unpack(record) {
     if (!room.game) fail('This saved room cannot be loaded.', 500);
   }
   if (room.league) {
-    room.league = leagueCore.restore(room.league, room.game);
+    room.league = leagueCore.restore(room.league, room.game, { clubs: clubsFor(room) });
     if (!room.league) fail('This saved league cannot be loaded.', 500);
   }
   return room;
@@ -215,7 +244,7 @@ function apply(room, uid, command, now) {
       host(room, uid);
       if (!room.game || room.status !== 'complete') fail('Finish the auction before starting the league.', 409);
       if (room.league) fail('The league has already started.', 409);
-      const result = leagueCore.create(room.game, (room.seed ^ 0x52ff8844) >>> 0);
+      const result = leagueCore.create(room.game, (room.seed ^ 0x52ff8844) >>> 0, { clubs: clubsFor(room) });
       if (result.error) fail(result.error);
       room.league = result.league; break;
     }
@@ -224,9 +253,21 @@ function apply(room, uid, command, now) {
       host(room, uid);
       if (!room.league || room.league.round >= leagueCore.roundCount(room.league)) fail('There is no matchday left to play.', 409);
       if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
-      if (command.type === 'playRound') { const view = room.matchView === 'pitch' ? 'pitch' : 'classic'; room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view }; }
+      // Only manager-v-manager matchdays play live; the rest of a Premier League season is instant.
+      const derby = room.league.fixtures.some(fixture => fixture.round === room.league.round && leagueCore.managerDerby(room.league, fixture));
+      if (command.type === 'playRound' && derby) { const view = room.matchView === 'pitch' ? 'pitch' : 'classic'; room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view }; }
       else room.live = null;
       do { room.league = leagueCore.playRound(room.league).league; } while (command.type === 'finishLeague' && room.league.round < leagueCore.roundCount(room.league));
+      break;
+    }
+    case 'skipToDerby': {
+      host(room, uid);
+      if (!room.league || room.league.round >= leagueCore.roundCount(room.league)) fail('There is no matchday left to play.', 409);
+      if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
+      const stop = leagueCore.nextDerbyRound(room.league);
+      if (stop === room.league.round) fail('The next matchday is a manager match. Play it live.', 409);
+      room.live = null;
+      while (room.league.round < (stop ?? leagueCore.roundCount(room.league))) room.league = leagueCore.playRound(room.league).league;
       break;
     }
     case 'matchView':
@@ -283,9 +324,10 @@ function view(room, uid) {
     pool: room.game.pool.filter(entry => known.has(entry.id)).map(entryView), skipped: skipped.slice(),
     unseenCount: room.game.remaining.filter(id => !skipped.includes(id) && !(room.game.phase === 'revealed' && id === room.game.currentId)).length,
     remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
-  const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion };
+  // Planned Premier League results stay on the server until each matchday is played.
+  const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion, competition: room.league.competition || 'friends', nextDerby: leagueCore.nextDerbyRound(room.league) };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
     isHost: room.hostUid === uid, me: me.managerId, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
     keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };
 }
-module.exports = { RoomError, create, pack, unpack, join, apply, view, resolve, leading, finished, linkNext, seasons, players };
+module.exports = { FIELD, premierClubs, RoomError, create, pack, unpack, join, apply, view, resolve, leading, finished, linkNext, seasons, players };
