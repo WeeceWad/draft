@@ -347,14 +347,15 @@
   }
 
   // A fixture's highlights, placed on the 0–97 match clock and fitted into the matchday's real duration.
-  function build({ result, home, away, seed, duration }) {
+  function build({ result, home, away, seed, duration, from = 0, to = END }) {
     const random = seeded(seed ^ 0x5eedba11);
     const slotsOf = team => draft.formations[team.formation] || draft.formations['4-3-3'];
     const teams = { home: { squad: home.squad, slots: slotsOf(home) }, away: { squad: away.squad, slots: slotsOf(away) } };
     const goals = [...result.homeScorers.map(goal => ({ ...goal, side: 'home' })), ...result.awayScorers.map(goal => ({ ...goal, side: 'away' }))].map(goal => ({ ...goal, abs: leagueCore.absoluteMinute(goal) }));
-    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }];
+    // One half at a time in substitutes mode: only what happens between from and to is played out.
+    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }].filter(plan => plan.abs >= from && plan.abs < to);
     let penalties = 0;
-    goals.forEach(goal => {
+    goals.filter(goal => goal.abs > from - (from ? 0 : 1) && goal.abs <= to).forEach(goal => {
       const roll = random();
       let style = goal.assistId ? (roll < .15 ? 'corner' : null) : roll < .25 && penalties < 2 ? 'penalty' : roll < .36 ? 'freekick' : null;
       if (style === 'penalty') penalties++;
@@ -363,7 +364,7 @@
     const homeXg = result.homeXg || 1.4, awayXg = result.awayXg || 1.2;
     function chance(side, priority) {
       for (let attempt = 0; attempt < 30; attempt++) {
-        const abs = 4 + random() * 90;
+        const abs = from + 4 + random() * (to - from - 7);
         if (Math.abs(abs - SECOND) < 2.5 || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
         const roll = random(), set = random(), style = set < .015 && penalties === 0 ? 'penalty' : set < .11 ? 'freekick' : null;
         if (style === 'penalty') penalties++;
@@ -402,19 +403,20 @@
       item.a1 = item.a0 + (item.length - item.cut) / 60; previousEnd = item.a1;
     }
     const highlightReal = real(speed);
-    let gapsAbs = Math.max(0, END - highlights.at(-1).a1), last = highlights[0].a1;
+    let gapsAbs = Math.max(0, to - highlights.at(-1).a1), last = highlights[0].a1;
     for (const item of highlights.slice(1)) { gapsAbs += Math.max(0, item.a0 - last); last = item.a1; }
     const budget = Math.max(0, duration - 1 - highlightReal), pieces = [];
-    let r = 0, a = 0, previous = null;
+    let r = 0, a = from, previous = null;
     for (const item of highlights) {
       const between = item.a0 - a;
       if (between > 0) { const length = gapsAbs ? budget * between / gapsAbs : 0; pieces.push({ r0: r, r1: r + length, a0: a, a1: item.a0, from: previous, to: item }); r += length; }
       const length = (item.length - item.cut) / speed;
       pieces.push({ r0: r, r1: r + length, a0: item.a0, a1: item.a1, item }); r += length; a = item.a1; previous = item;
     }
-    pieces.push({ r0: r, r1: Math.max(r + .001, duration - 1), a0: Math.min(a, END), a1: END, from: previous, to: null });
+    pieces.push({ r0: r, r1: Math.max(r + .001, duration - 1), a0: Math.min(a, to), a1: to, from: previous, to: null });
     const events = highlights.flatMap(item => item.events.filter(event => event.t >= item.cut).map(event => ({ ...event, abs: event.goal ? item.plan.abs : item.a0 + (event.t - item.cut) / 60 })));
-    events.push({ abs: 48, text: 'Half-time' }, { abs: END, text: 'Full time' });
+    if (from < 48 && to >= 48) events.push({ abs: 48, text: 'Half-time' });
+    if (to === END) events.push({ abs: END, text: 'Full time' });
     return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights };
   }
   const pieceAt = (timeline, r) => timeline.pieces.find(piece => r < piece.r1) || timeline.pieces.at(-1);

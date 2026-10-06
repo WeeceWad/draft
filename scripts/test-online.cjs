@@ -88,6 +88,59 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   assert.equal(table.reduce((sum, row) => sum + row.won, 0), table.reduce((sum, row) => sum + row.lost, 0));
   assert(engine.finished(pl));
 }
+// Substitutes mode (Touchline's own rules): 16-player squads with two keepers, half-time changes and fatigue.
+{
+  const draft = require('../src/draft-core.js');
+  let subs = lobby();
+  subs = command(subs, 'a', 'settings', { capacity: 3, config: { ...config, subs: true } });
+  subs.members.forEach(member => { subs = command(subs, member.uid, 'ready', { ready: true }); });
+  subs = command(subs, 'a', 'start');
+  assert.equal(subs.game.pool.length, 48); assert.equal(subs.game.pool.filter(entry => entry.player.positions.includes('GK')).length, 6);
+  while (subs.status !== 'complete') {
+    subs = command(subs, 'a', 'reveal'); time += 2000;
+    const active = engine.view(subs, 'a').round.active, winner = subs.members.find(member => active.includes(member.managerId));
+    subs = command(subs, winner.uid, 'bid', { price: 1 });
+    if (subs.round.status === 'open') { time = subs.round.deadline; subs = command(subs, null, 'tick'); }
+  }
+  for (const manager of subs.game.managers) {
+    const owned = auction.purchases(subs.game, manager.id);
+    assert.equal(owned.length, 16, 'Substitutes squads have 16 players');
+    assert.equal(owned.filter(sale => subs.game.pool.find(entry => entry.id === sale.playerId).player.positions.includes('GK')).length, 2, 'Every squad ends with two keepers');
+  }
+  subs.members.forEach(member => { subs = command(subs, member.uid, 'autoPlace'); });
+  subs = command(subs, 'a', 'startLeague');
+  const snapshot = subs.league.teams.find(team => team.id === 'manager-1');
+  assert.equal(snapshot.squad.length, 11); assert.equal(snapshot.bench.length, 5);
+  subs = command(subs, 'a', 'playRound');
+  assert(subs.league.pending, 'Matchdays stop at half-time');
+  assert.deepEqual([subs.live.from, subs.live.to, subs.live.half, subs.live.endsAt - time], [0, 48, 1, 9000]);
+  const fixture = subs.league.fixtures.find(item => subs.league.pending.firstHalf[item.id]);
+  const firstHalf = subs.league.pending.firstHalf[fixture.id];
+  assert([...firstHalf.homeScorers, ...firstHalf.awayScorers].every(goal => league.absoluteMinute(goal) <= 48), 'First-half goals happen in the first half');
+  const homeUid = subs.members.find(member => member.managerId === fixture.homeId).uid, homeTeam = subs.league.teams.find(team => team.id === fixture.homeId);
+  assert.throws(() => command(subs, homeUid, 'substitute', { off: homeTeam.squad[0].id, on: homeTeam.bench[0].id }), /Wait for half-time/);
+  time = subs.live.endsAt;
+  assert.throws(() => command(subs, homeUid, 'substitute', { off: homeTeam.bench[0].id, on: homeTeam.bench[1].id }), /on the pitch/);
+  const outfield = homeTeam.squad.filter(player => player.position !== 'GK');
+  for (let index = 0; index < 5; index++) subs = command(subs, homeUid, 'substitute', { off: outfield[index].id, on: homeTeam.bench[index].id });
+  assert.throws(() => command(subs, homeUid, 'substitute', { off: outfield[5].id, on: homeTeam.bench[0].id }), /all five/);
+  subs = command(subs, homeUid, 'undoSub'); subs = command(subs, homeUid, 'readyHalf', { ready: true });
+  assert.equal(subs.league.pending.ready[fixture.homeId], true);
+  const saved = engine.unpack(engine.pack(subs));
+  assert.deepEqual(saved.league.pending.changes, subs.league.pending.changes, 'Half-time changes survive a restart');
+  assert.throws(() => command(subs, 'b', 'secondHalf'), /Only the host/);
+  assert.throws(() => command(subs, 'a', 'playRound'), /second half/);
+  subs = command(subs, 'a', 'secondHalf');
+  assert.equal(subs.league.round, 1); assert.equal(subs.league.pending, null); assert.deepEqual([subs.live.from, subs.live.to, subs.live.half], [48, 97, 2]);
+  const result = subs.league.fixtures.find(item => item.id === fixture.id).result;
+  assert.equal(result.subs.home.length, 4); assert.deepEqual(result.halfTime, { home: firstHalf.homeGoals, away: firstHalf.awayGoals });
+  const pitch = new Set(league.lineupAfter(homeTeam, result.subs.home).map(player => player.id));
+  assert(result.homeScorers.filter(goal => league.absoluteMinute(goal) > 48).every(goal => pitch.has(goal.playerId)), 'Second-half scorers were on the pitch');
+  assert(league.secondHalfTeam(homeTeam, []).overall <= homeTeam.overall, 'Tired starters are weaker after the break');
+  time = subs.live.endsAt; subs = command(subs, 'a', 'finishLeague');
+  assert(subs.league.fixtures.every(item => item.result.halfTime && item.result.subs));
+  assert.deepEqual(engine.unpack(engine.pack(subs)).league.fixtures, subs.league.fixtures, 'Substitutes seasons replay exactly');
+}
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
 assert.throws(() => command(room, 'b', 'formation', { formation: '3-5-2' }), /fixed formation/);
@@ -179,10 +232,10 @@ assert.throws(() => command(room, 'b', 'playRound'), /Only the host/);
 assert.throws(() => command(room, 'a', 'autoPlace'), /locked/);
 assert.throws(() => command(room, 'b', 'matchView', { view: 'pitch' }), /Only the host/);
 room = command(room, 'a', 'playRound');
-assert.deepEqual(engine.view(room, 'b').live, { round: 0, startsAt: time, endsAt: time + 18000, view: 'classic' });
+assert.deepEqual(engine.view(room, 'b').live, { round: 0, startsAt: time, endsAt: time + 18000, view: 'classic', from: 0, to: 97 });
 time = room.live.endsAt; room = command(room, 'a', 'matchView', { view: 'pitch' }); assert.equal(engine.view(room, 'c').matchView, 'pitch');
 room = command(room, 'a', 'playRound');
-assert.deepEqual(engine.view(room, 'b').live, { round: 1, startsAt: time, endsAt: time + 150000, view: 'pitch' }, 'The beta pitch view plays longer matchdays');
+assert.deepEqual(engine.view(room, 'b').live, { round: 1, startsAt: time, endsAt: time + 150000, view: 'pitch', from: 0, to: 97 }, 'The beta pitch view plays longer matchdays');
 assert.throws(() => command(room, 'a', 'playRound'), /in play/); assert.throws(() => command(room, 'a', 'finishLeague'), /in play/);
 time = room.live.endsAt;
 room = command(room, 'a', 'finishLeague'); assert.equal(room.live, null);

@@ -103,3 +103,12 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .resume-card p{margin:4px 0 0}
 .resume-card .actions{flex:0 1 360px}
 .manager-row td,.manager-row td:nth-child(2){color:var(--green);font-weight:800}
+.subs-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.sub-option{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-top:6px;cursor:pointer;font-size:13px}
+.sub-option input{width:18px;height:18px;min-height:0;margin:0;accent-color:var(--green);flex:none}
+.sub-option:has(input:checked){border-color:var(--green);background:#243c2c}
+.sub-option .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.energy{width:46px;height:6px;border-radius:3px;background:#0e1520;overflow:hidden;flex:none}
+.energy span{display:block;height:100%;background:var(--green)}
+.energy-label{width:34px;text-align:right;color:var(--muted)}
+@media(max-width:799px){.subs-grid{grid-template-columns:1fr}}

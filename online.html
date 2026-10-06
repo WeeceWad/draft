@@ -104,6 +104,15 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .resume-card p{margin:4px 0 0}
 .resume-card .actions{flex:0 1 360px}
 .manager-row td,.manager-row td:nth-child(2){color:var(--green);font-weight:800}
+.subs-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.sub-option{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-top:6px;cursor:pointer;font-size:13px}
+.sub-option input{width:18px;height:18px;min-height:0;margin:0;accent-color:var(--green);flex:none}
+.sub-option:has(input:checked){border-color:var(--green);background:#243c2c}
+.sub-option .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.energy{width:46px;height:6px;border-radius:3px;background:#0e1520;overflow:hidden;flex:none}
+.energy span{display:block;height:100%;background:var(--green)}
+.energy-label{width:34px;text-align:right;color:var(--muted)}
+@media(max-width:799px){.subs-grid{grid-template-columns:1fr}}
 </style></head>
 <body><header class="top"><a class="brand" href="/">◈ <span>TOUCHLINE<small>LIVE AUCTION</small></span></a><div id="connection" class="connection">Connecting…</div><button id="sound-toggle" class="quiet" hidden>Sound on</button><button id="rating-toggle" class="quiet" hidden>Hide ratings</button></header><main id="app"><div class="panel">Connecting to Touchline…</div></main><div id="toast" role="status" aria-live="polite"></div><script>(function (scope) {
   const row = (positions, y, xs) => positions.map((position, i) => ({ position, x: xs[i], y }));
@@ -175,7 +184,11 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const FREE = 'Free';
   const poolShape = formation => formations[formation === FREE ? '4-3-3' : formation];
   const formationOf = (game, manager) => formations[manager?.formation] ? manager.formation : formations[game.config.formation] ? game.config.formation : '4-3-3';
-  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf };
+  // Substitutes mode: 16-player squads, an XI plus a bench with a second keeper.
+  const BENCH = ['GK', 'CB', 'CM', 'CM', 'ST'];
+  const squadSize = config => config?.subs ? 16 : 11;
+  const keepersNeeded = config => config?.subs ? 2 : 1;
+  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, BENCH, squadSize, keepersNeeded };
   if (typeof module !== 'undefined') module.exports = api;
   else scope.DraftCore = api;
 })(globalThis);
@@ -197,11 +210,12 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       return seasons.length ? [{ player, seasons }] : [];
     });
   }
-  function balance(eligible, formation, managerCount, random = Math.random) {
+  function balance(eligible, formation, managerCount, random = Math.random, subs = false) {
     const shape = draft.poolShape(formation);
     if (!shape || !Number.isInteger(managerCount) || managerCount < 2 || managerCount > 8) return { error: 'Choose a formation and between 2 and 8 managers.' };
-    if (eligible.length < managerCount * 11) return { error: `You need at least ${managerCount * 11} different players. Widen your season or rating range.` };
-    const needs = Array.from({ length: managerCount }, () => shape.map(slot => slot.position)).flat();
+    const size = subs ? 16 : 11;
+    if (eligible.length < managerCount * size) return { error: `You need at least ${managerCount * size} different players. Widen your season or rating range.` };
+    const needs = Array.from({ length: managerCount }, () => [...shape.map(slot => slot.position), ...(subs ? draft.BENCH : [])]).flat();
     const byPosition = new Map();
     for (const position of new Set(needs)) {
       const indexes = eligible.flatMap((entry, i) => {
@@ -232,7 +246,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   function makePool(players, config, random = Math.random) {
     const eligible = candidates(players, config);
-    const result = balance(eligible, config.formation, config.managerCount, random);
+    const result = balance(eligible, config.formation, config.managerCount, random, !!config.subs);
     if (result.error) return result;
     const pool = result.assigned.map((index, slot) => {
       const entry = eligible[index];
@@ -262,7 +276,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const manager = game.managers.find(manager => manager.id === managerId);
     if (!manager) return { error: 'Choose the winning manager.' };
     if (!Number.isInteger(price) || price < 0) return { error: 'Enter a whole-million price, including £0 for a free transfer.' };
-    if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
+    const size = draft.squadSize(game.config);
+    if (purchases(game, managerId).length >= size) return { error: `${manager.name} already has ${size} players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
     return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
@@ -309,7 +324,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
         if (!season || !candidates([{ ...player, clubSeasons: [season] }], config).length) throw Error('Invalid saved pool');
         return { id: player.id, player, season, allocatedPosition: record.allocatedPosition };
       });
-      if (pool.length !== config.managerCount * 11 || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
+      if ((config.subs !== undefined && typeof config.subs !== 'boolean') || pool.length !== config.managerCount * draft.squadSize(config) || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
       let game = createGame(config, pool);
       // Replay sales through normal validation to rebuild budgets and ownership.
       for (const sale of saved.sales) {
@@ -379,16 +394,12 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const rank = naturalRank(position, positions);
     return rank === 0 ? 1 : rank === 1 ? .99 : rank >= 2 ? .98 : .93;
   }
-  function team(game, manager) {
-    const formation = draft.formationOf(game, manager), slots = draft.formations[formation];
-    const pool = new Map(game.pool.map(entry => [entry.id, entry]));
-    const backFive = slots.filter(slot => slot.position === 'CB').length === 3 && formation.startsWith('5-');
-    const squad = slots.flatMap((slot, index) => {
-      const entry = pool.get(manager.board[index]);
-      if (!entry) return [];
-      const rating = draft.rating(entry, game.config.mode), fit = fitMultiplier(slot.position, entry.player.positions);
-      const unit = ['LWB', 'RWB'].includes(slot.position) ? (backFive ? 'defence' : 'midfield') : units[slot.position];
-      return [{ id: entry.id, name: entry.player.name, position: slot.position, positions: entry.player.positions.slice(), rating, effective: Math.max(40, rating * fit), fit, unit }];
+  // Team strength from the players in each slot: position fit, units and weights as 38-0 does it.
+  function rate(entries, formation) {
+    const backFive = draft.formations[formation].filter(slot => slot.position === 'CB').length === 3 && formation.startsWith('5-');
+    const squad = entries.map(entry => {
+      const fit = fitMultiplier(entry.position, entry.positions), unit = ['LWB', 'RWB'].includes(entry.position) ? (backFive ? 'defence' : 'midfield') : units[entry.position];
+      return { ...entry, effective: Math.max(40, entry.rating * fit), fit, unit };
     });
     const exact = {};
     for (const unit of Object.keys(unitWeights)) {
@@ -399,10 +410,43 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const present = Object.keys(unitWeights).filter(unit => exact[unit] > 0);
     const denominator = present.reduce((sum, unit) => sum + unitWeights[unit], 0);
     const overall = denominator ? Math.round(present.reduce((sum, unit) => sum + exact[unit] * unitWeights[unit], 0) / denominator) : 0;
-    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), squad, overall,
-      ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])),
-      placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length,
+    return { squad, overall, ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])), placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length };
+  }
+  function team(game, manager) {
+    const formation = draft.formationOf(game, manager), slots = draft.formations[formation];
+    const pool = new Map(game.pool.map(entry => [entry.id, entry]));
+    const describe = (entry, position) => ({ id: entry.id, name: entry.player.name, position, positions: entry.player.positions.slice(), rating: draft.rating(entry, game.config.mode) });
+    const entries = slots.flatMap((slot, index) => { const entry = pool.get(manager.board[index]); return entry ? [describe(entry, slot.position)] : []; });
+    const bench = game.config.subs ? auction.purchases(game, manager.id).filter(sale => !manager.board.includes(sale.playerId)).map(sale => describe(pool.get(sale.playerId), pool.get(sale.playerId).player.positions[0])) : undefined;
+    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), ...rate(entries, formation), ...(bench ? { bench } : {}),
       spent: auction.STARTING_BUDGET - auction.budget(game, manager.id) };
+  }
+  // Substitutes mode (Touchline's own rules; 38-0 has no substitutions). Starters tire in the
+  // second half by position; players coming off the bench are fresh.
+  const FATIGUE = { GK: .01, CB: .04, LB: .07, RB: .07, LWB: .08, RWB: .08, CDM: .05, CM: .06, CAM: .06, LM: .07, RM: .07, LW: .07, RW: .07, ST: .06 };
+  function lineupAfter(snapshot, changes = []) {
+    const players = snapshot.squad.map(player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating, fresh: false }));
+    for (const change of changes) {
+      const index = players.findIndex(player => player.id === change.off), incoming = snapshot.bench.find(player => player.id === change.on);
+      if (index >= 0 && incoming) players[index] = { id: incoming.id, name: incoming.name, position: players[index].position, positions: incoming.positions, rating: incoming.rating, fresh: true };
+    }
+    return players;
+  }
+  function secondHalfTeam(snapshot, changes = []) {
+    const entries = lineupAfter(snapshot, changes).map(player => ({ ...player, rating: player.rating * (1 - (player.fresh ? 0 : FATIGUE[player.position] || .05)) }));
+    return { ...snapshot, ...rate(entries, snapshot.formation) };
+  }
+  // Instant matchdays make up to three sensible changes: the most tired outfield starters for the best bench fit.
+  function autoChanges(snapshot) {
+    if (!snapshot.bench?.length) return [];
+    const changes = [], used = new Set();
+    const tired = snapshot.squad.filter(player => player.position !== 'GK').sort((a, b) => (FATIGUE[b.position] || 0) - (FATIGUE[a.position] || 0) || a.rating - b.rating);
+    for (const starter of tired) {
+      if (changes.length >= 3) break;
+      const option = snapshot.bench.filter(player => !used.has(player.id) && !player.positions.includes('GK') && naturalRank(starter.position, player.positions) >= 0).sort((a, b) => b.rating - a.rating)[0];
+      if (option && option.rating >= starter.rating * (1 - (FATIGUE[starter.position] || .05)) - 2) { used.add(option.id); changes.push({ off: starter.id, on: option.id }); }
+    }
+    return changes;
   }
   function readiness(game) {
     if (game.phase !== 'complete') return { ready: false, message: 'Finish the auction before starting your league.' };
@@ -455,10 +499,11 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const fromAbsolute = value => value <= 45 ? { minute: value } : value <= 48 ? { minute: 45, stoppage: value - 45 } : value <= 93 ? { minute: value - 3 } : { minute: 90, stoppage: value - 93 };
   const minuteLabel = goal => goal.stoppage ? `${goal.minute}+${goal.stoppage}′` : `${goal.minute}′`;
   // As in 38-0, no two goals in a match share a minute: clashes move later, within the final whistle.
-  function separate(...lists) {
+  function separate(...lists) { spread(97, 1, lists); }
+  function spread(last, first, lists) {
     const goals = lists.flat().sort(goalOrder), times = goals.map(absoluteMinute);
     for (let index = 1; index < times.length; index++) if (times[index] <= times[index - 1]) times[index] = times[index - 1] + 1;
-    for (let index = times.length - 1; index >= 0; index--) { const limit = index === times.length - 1 ? 97 : times[index + 1] - 1; if (times[index] > limit) times[index] = Math.max(1, limit); }
+    for (let index = times.length - 1; index >= 0; index--) { const limit = index === times.length - 1 ? last : times[index + 1] - 1; if (times[index] > limit) times[index] = Math.max(first, limit); }
     goals.forEach((goal, index) => { const time = fromAbsolute(times[index]); goal.minute = time.minute; if (time.stoppage === undefined) delete goal.stoppage; else goal.stoppage = time.stoppage; });
     for (const list of lists) list.sort(goalOrder);
   }
@@ -588,12 +633,50 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     });
   }
   const isManagerTeam = item => !item.club;
+  // One half of a substitutes-mode match: half the expected goals, goal times inside that half.
+  function simulateHalf(home, away, seed, tallies, half) {
+    const random = seeded((seed ^ (half === 1 ? 0x2c1b3c6d : 0x68e31da4)) >>> 0), assists = seeded((seed ^ (half === 1 ? 0x51a7c0de : 0x3b9aca07)) >>> 0);
+    const homeXg = expectedGoals(home.overall, away.overall, true) / 2, awayXg = expectedGoals(away.overall, home.overall, false) / 2;
+    const homeGoals = poisson(homeXg, random), awayGoals = poisson(awayXg, random);
+    const place = goal => { const target = half === 1 ? clamp(Math.round(absoluteMinute(goal) * 48 / 97), 1, 48) : clamp(49 + Math.round(absoluteMinute(goal) * 48 / 97), 49, 97), time = fromAbsolute(target); goal.minute = time.minute; if (time.stoppage === undefined) delete goal.stoppage; else goal.stoppage = time.stoppage; return goal; };
+    const homeScorers = goalEvents(home.squad, homeGoals, random, tallies, assists).map(place), awayScorers = goalEvents(away.squad, awayGoals, random, tallies, assists).map(place);
+    spread(half === 1 ? 48 : 97, half === 1 ? 1 : 49, [homeScorers, awayScorers]);
+    return { homeGoals, awayGoals, homeXg, awayXg, homeScorers, awayScorers };
+  }
+  const tallyOf = (league, extra = []) => { const tallies = new Map(); for (const result of [...league.fixtures.map(fixture => fixture.result), ...extra]) if (result) for (const scorer of [...result.homeScorers, ...result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1); return tallies; };
+  // Substitutes mode: kick off a matchday's first halves; the second halves wait for the managers' changes.
+  function startRound(league) {
+    if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
+    const teams = new Map(league.teams.map(item => [item.id, item])), tallies = tallyOf(league), firstHalf = {};
+    for (const fixture of league.fixtures) if (fixture.round === league.round && !league.planned?.[fixture.id]) firstHalf[fixture.id] = simulateHalf(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies, 1);
+    return { league: { ...league, pending: { round: league.round, firstHalf, changes: {}, ready: {} } } };
+  }
+  function finishRound(league, changes = league.pending?.changes || {}) {
+    if (!league.pending) return { error: 'Kick off the first half first.' };
+    const teams = new Map(league.teams.map(item => [item.id, item])), firstHalf = league.pending.firstHalf, tallies = tallyOf(league, Object.values(firstHalf)), used = {};
+    const fixtures = league.fixtures.map(fixture => {
+      if (fixture.round !== league.round) return fixture;
+      if (league.planned?.[fixture.id]) return { ...fixture, result: league.planned[fixture.id] };
+      const made = { home: changes[fixture.id]?.home || [], away: changes[fixture.id]?.away || [] };
+      used[fixture.id] = made;
+      const a = firstHalf[fixture.id], b = simulateHalf(secondHalfTeam(teams.get(fixture.homeId), made.home), secondHalfTeam(teams.get(fixture.awayId), made.away), hash(league.seed, fixture.id), tallies, 2);
+      return { ...fixture, result: { homeGoals: a.homeGoals + b.homeGoals, awayGoals: a.awayGoals + b.awayGoals, homeXg: a.homeXg + b.homeXg, awayXg: a.awayXg + b.awayXg, homeScorers: [...a.homeScorers, ...b.homeScorers], awayScorers: [...a.awayScorers, ...b.awayScorers], halfTime: { home: a.homeGoals, away: a.awayGoals }, subs: made } };
+    });
+    return { league: { ...league, fixtures, round: league.round + 1, pending: null, subs: { ...league.subs, ...used } } };
+  }
+  // Instant play in substitutes mode: both halves, with automatic changes for every side.
+  function playWithSubs(league) {
+    const started = startRound(league); if (started.error) return started;
+    const teams = new Map(league.teams.map(item => [item.id, item])), changes = {};
+    for (const id of Object.keys(started.league.pending.firstHalf)) { const fixture = league.fixtures.find(item => item.id === id); changes[id] = { home: autoChanges(teams.get(fixture.homeId)), away: autoChanges(teams.get(fixture.awayId)) }; }
+    return finishRound(started.league, changes);
+  }
   function create(game, seed = Math.floor(Math.random() * 4294967296), { clubs = [] } = {}) {
     const check = readiness(game);
     if (!check.ready) return { error: check.message };
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) return { error: 'Invalid league seed.' };
     const teams = [...game.managers.map(manager => team(game, manager)), ...clubs.map(club => ({ ...club, club: true, overall: club.strength }))];
-    const league = { version: 1, engineVersion: VERSION, seed, round: 0, competition: clubs.length ? 'premier' : 'friends', teams, fixtures: schedule(teams.map(item => item.id)) };
+    const league = { version: 1, engineVersion: VERSION, seed, round: 0, competition: clubs.length ? 'premier' : 'friends', teams, fixtures: schedule(teams.map(item => item.id)), ...(game.config.subs ? { subs: {}, pending: null } : {}) };
     if (clubs.length) league.planned = plan(league);
     return { league };
   }
@@ -614,6 +697,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
   function playRound(league) {
     if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
+    if (league.subs) return playWithSubs(league);
     const teams = new Map(league.teams.map(team => [team.id, team]));
     const tallies = new Map();
     for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1);
@@ -648,7 +732,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return { biggestBuy, bargain, biggestSpender };
   }
   function serialise(league) {
-    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: team.board })) } : null;
+    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', ...(league.subs ? { subs: league.subs, pending: league.pending ? { round: league.pending.round, changes: league.pending.changes, ready: league.pending.ready } : null } : {}), boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: team.board })) } : null;
   }
   function restore(saved, game, { clubs = [] } = {}) {
     try {
@@ -657,11 +741,17 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       if ((saved.competition || 'friends') !== (clubs.length ? 'premier' : 'friends')) return null;
       let league = create(game, saved.seed, { clubs }).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
+      if (league.subs) {
+        // Replay with the changes the managers actually made, then reopen any half-time in progress.
+        for (let round = 0; round < saved.round; round++) { league = startRound(league).league; league = finishRound(league, Object.fromEntries(league.fixtures.filter(fixture => fixture.round === round).map(fixture => [fixture.id, saved.subs?.[fixture.id] || { home: [], away: [] }]))).league; }
+        if (saved.pending) { if (saved.pending.round !== saved.round) return null; league = startRound(league).league; league.pending.changes = saved.pending.changes || {}; league.pending.ready = saved.pending.ready || {}; }
+        return league;
+      }
       for (let round = 0; round < saved.round; round++) league = playRound(league).league;
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, FATIGUE, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);
 </script><script>(function (scope) {
@@ -1013,14 +1103,15 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
 
   // A fixture's highlights, placed on the 0–97 match clock and fitted into the matchday's real duration.
-  function build({ result, home, away, seed, duration }) {
+  function build({ result, home, away, seed, duration, from = 0, to = END }) {
     const random = seeded(seed ^ 0x5eedba11);
     const slotsOf = team => draft.formations[team.formation] || draft.formations['4-3-3'];
     const teams = { home: { squad: home.squad, slots: slotsOf(home) }, away: { squad: away.squad, slots: slotsOf(away) } };
     const goals = [...result.homeScorers.map(goal => ({ ...goal, side: 'home' })), ...result.awayScorers.map(goal => ({ ...goal, side: 'away' }))].map(goal => ({ ...goal, abs: leagueCore.absoluteMinute(goal) }));
-    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }];
+    // One half at a time in substitutes mode: only what happens between from and to is played out.
+    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }].filter(plan => plan.abs >= from && plan.abs < to);
     let penalties = 0;
-    goals.forEach(goal => {
+    goals.filter(goal => goal.abs > from - (from ? 0 : 1) && goal.abs <= to).forEach(goal => {
       const roll = random();
       let style = goal.assistId ? (roll < .15 ? 'corner' : null) : roll < .25 && penalties < 2 ? 'penalty' : roll < .36 ? 'freekick' : null;
       if (style === 'penalty') penalties++;
@@ -1029,7 +1120,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const homeXg = result.homeXg || 1.4, awayXg = result.awayXg || 1.2;
     function chance(side, priority) {
       for (let attempt = 0; attempt < 30; attempt++) {
-        const abs = 4 + random() * 90;
+        const abs = from + 4 + random() * (to - from - 7);
         if (Math.abs(abs - SECOND) < 2.5 || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
         const roll = random(), set = random(), style = set < .015 && penalties === 0 ? 'penalty' : set < .11 ? 'freekick' : null;
         if (style === 'penalty') penalties++;
@@ -1068,19 +1159,20 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       item.a1 = item.a0 + (item.length - item.cut) / 60; previousEnd = item.a1;
     }
     const highlightReal = real(speed);
-    let gapsAbs = Math.max(0, END - highlights.at(-1).a1), last = highlights[0].a1;
+    let gapsAbs = Math.max(0, to - highlights.at(-1).a1), last = highlights[0].a1;
     for (const item of highlights.slice(1)) { gapsAbs += Math.max(0, item.a0 - last); last = item.a1; }
     const budget = Math.max(0, duration - 1 - highlightReal), pieces = [];
-    let r = 0, a = 0, previous = null;
+    let r = 0, a = from, previous = null;
     for (const item of highlights) {
       const between = item.a0 - a;
       if (between > 0) { const length = gapsAbs ? budget * between / gapsAbs : 0; pieces.push({ r0: r, r1: r + length, a0: a, a1: item.a0, from: previous, to: item }); r += length; }
       const length = (item.length - item.cut) / speed;
       pieces.push({ r0: r, r1: r + length, a0: item.a0, a1: item.a1, item }); r += length; a = item.a1; previous = item;
     }
-    pieces.push({ r0: r, r1: Math.max(r + .001, duration - 1), a0: Math.min(a, END), a1: END, from: previous, to: null });
+    pieces.push({ r0: r, r1: Math.max(r + .001, duration - 1), a0: Math.min(a, to), a1: to, from: previous, to: null });
     const events = highlights.flatMap(item => item.events.filter(event => event.t >= item.cut).map(event => ({ ...event, abs: event.goal ? item.plan.abs : item.a0 + (event.t - item.cut) / 60 })));
-    events.push({ abs: 48, text: 'Half-time' }, { abs: END, text: 'Full time' });
+    if (from < 48 && to >= 48) events.push({ abs: 48, text: 'Half-time' });
+    if (to === END) events.push({ abs: END, text: 'Full time' });
     return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights };
   }
   const pieceAt = (timeline, r) => timeline.pieces.find(piece => r < piece.r1) || timeline.pieces.at(-1);
@@ -1265,7 +1357,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let allFixtures = false, resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let selectedOff = null, selectedOn = null, allFixtures = false, resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
   let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
@@ -1276,7 +1368,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const entry = id => room?.game?.pool.find(player => player.id === id);
   const rating = player => DraftCore.rating(player, room.game.config.mode);
   const myBudget = () => room?.game ? AuctionCore.budget(room.game, room.me) : 1000;
-  const myFull = () => room?.game && AuctionCore.purchases(room.game, room.me).length >= 11;
+  const squadSize = () => DraftCore.squadSize(room?.game?.config || room?.config);
+  const myFull = () => room?.game && AuctionCore.purchases(room.game, room.me).length >= squadSize();
   const disabled = value => value ? 'disabled' : '';
   const wheel = spinning => `<div class="mystery-wheel" role="img" aria-label="Mystery player wheel. Identities stay hidden until the spin ends."><div class="wheel-disc ${spinning ? 'spinner' : ''}"></div><span class="wheel-arrow"></span><span class="wheel-centre">?</span></div>`;
   let toastTimer;
@@ -1321,8 +1414,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return state?.game && AuctionCore.budget(state.game, state.me) === 0 ? 0 : 1;
   }
   function blockedReason(managerId, keeper) {
-    if (AuctionCore.purchases(room.game, managerId).length >= 11) return 'Your XI is full';
-    return keeper ? 'You already have a goalkeeper' : 'Your last spot is saved for a goalkeeper';
+    if (AuctionCore.purchases(room.game, managerId).length >= squadSize()) return 'Your squad is full';
+    return keeper ? (DraftCore.keepersNeeded(room.game.config) === 1 ? 'You already have a goalkeeper' : 'You already have two goalkeepers') : 'Your last spots are saved for goalkeepers';
   }
   function cue(before, after) {
     if (!after) return;
@@ -1353,7 +1446,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     catch (error) { toast(error.message); }
     finally { busy = false; render(); }
   }
-  function rules(config) { return `<div class="rules stack">${config.devMode ? '<p class="pill green">Dev mode · the auction is skipped and XIs are picked automatically</p>' : ''}<div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>League</span><strong>${config.competition === 'premier' ? 'Premier League · 20 teams' : 'Just us · home & away'}</strong></div><div class="row"><span>Formation</span><strong>${config.formation === DraftCore.FREE ? 'Free · each manager picks' : esc(config.formation)}</strong></div><p>£1bn each · 11 players each · bids from £1m in whole millions · 60 seconds from the first bid · +10 seconds per new bid · the highest bidder is locked in. The host can change these in the lobby. They lock when the auction starts.</p></div>`; }
+  function rules(config) { return `<div class="rules stack">${config.devMode ? '<p class="pill green">Dev mode · the auction is skipped and XIs are picked automatically</p>' : ''}<div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>League</span><strong>${config.competition === 'premier' ? 'Premier League · 20 teams' : 'Just us · home & away'}</strong></div><div class="row"><span>Formation</span><strong>${config.formation === DraftCore.FREE ? 'Free · each manager picks' : esc(config.formation)}</strong></div><p>£1bn each · ${config.subs ? '16 players each (XI + 5 subs)' : '11 players each'} · bids from £1m in whole millions · 60 seconds from the first bid · +10 seconds per new bid · the highest bidder is locked in. The host can change these in the lobby. They lock when the auction starts.</p></div>`; }
   function home() {
     const code = new URLSearchParams(location.search).get('code') || '';
     return `<div class="hero"><div class="eyebrow">A room. A budget. Your best XI.</div><h1 class="gap-top">Build your team.<br>Beat your mates.</h1><p>A live football auction, straight from your phone. Draft legends, outbid your friends, then play a league together.</p></div>${resumable ? `<section class="panel resume-card"><div><div class="eyebrow">Continue where you left off</div><h2>Room ${esc(resumable.code)}</h2><p>${esc(resumable.label)}</p></div><div class="actions"><button class="primary" data-do="resume" ${disabled(busy)}>Rejoin room →</button><button class="quiet" data-do="forget">Forget it</button></div></section>` : ''}<div class="grid home-panels"><section class="panel stack"><div class="eyebrow">You set the rules</div><h2>Host an auction</h2><p>Choose your player pool, share a four-digit code and get everyone ready.</p><button class="primary" data-do="setup">Create room →</button></section><form id="join-form" class="panel stack"><div class="eyebrow">Got an invite?</div><h2>Join your friends</h2><div class="field"><label for="join-name">Your manager name</label><input id="join-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="join-code">Room code</label><input class="code-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required value="${esc(/^\d{4}$/.test(code) ? code : '')}" placeholder="0000" autocomplete="off"></div><button class="primary" ${disabled(busy)}>Join room →</button></form><p class="wide hint">Each manager needs their own browser or device. Already playing? Use the same browser to rejoin with your saved team. <a href="/offline.html">Play the local version</a>.</p></div>`;
@@ -1361,11 +1454,11 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   // The same rule controls create a room and, for the host, edit it in the lobby.
   function ruleFields(values, minimum = 2) {
     const from = Math.max(0, seasons.indexOf(values.seasonFrom)), to = Math.max(0, seasons.indexOf(values.seasonTo));
-    return `<div class="grid"><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => i + 2).map(count => `<option value="${count}" ${count === values.capacity ? 'selected' : ''} ${count < minimum ? 'disabled' : ''}>${count} managers · ${count * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${[DraftCore.FREE, ...Object.keys(DraftCore.formations)].map(value => `<option value="${esc(value)}" ${value === values.formation ? 'selected' : ''}>${value === DraftCore.FREE ? 'Free (each manager picks)' : esc(value)}</option>`).join('')}</select></div><div class="field"><label for="competition">League format</label><select id="competition" name="competition"><option value="friends" ${values.competition !== 'premier' ? 'selected' : ''}>Just us · home &amp; away</option><option value="premier" ${values.competition === 'premier' ? 'selected' : ''}>Premier League · 20 teams with 38-0's clubs</option></select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak" ${values.mode === 'peak' ? 'selected' : ''}>Peak overall rating</option><option value="season" ${values.mode === 'season' ? 'selected' : ''}>Rating in the selected season</option></select></div></div><div class="slider-grid"><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[from])} – ${esc(seasons[to])}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="${from}"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${to}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">${values.ratingMin} – ${values.ratingMax}</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="${values.ratingMin}"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="${values.ratingMax}"></label></div></div></div><label class="check"><input type="checkbox" name="devMode" ${values.devMode ? 'checked' : ''}><span><strong>Dev mode</strong> · skip the auction. Every manager gets a full XI in the right positions, so you can go straight to the league.</span></label>`;
+    return `<div class="grid"><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => i + 2).map(count => `<option value="${count}" ${count === values.capacity ? 'selected' : ''} ${count < minimum ? 'disabled' : ''}>${count} managers · ${count * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${[DraftCore.FREE, ...Object.keys(DraftCore.formations)].map(value => `<option value="${esc(value)}" ${value === values.formation ? 'selected' : ''}>${value === DraftCore.FREE ? 'Free (each manager picks)' : esc(value)}</option>`).join('')}</select></div><div class="field"><label for="competition">League format</label><select id="competition" name="competition"><option value="friends" ${values.competition !== 'premier' ? 'selected' : ''}>Just us · home &amp; away</option><option value="premier" ${values.competition === 'premier' ? 'selected' : ''}>Premier League · 20 teams with 38-0's clubs</option></select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak" ${values.mode === 'peak' ? 'selected' : ''}>Peak overall rating</option><option value="season" ${values.mode === 'season' ? 'selected' : ''}>Rating in the selected season</option></select></div></div><div class="slider-grid"><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[from])} – ${esc(seasons[to])}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="${from}"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${to}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">${values.ratingMin} – ${values.ratingMax}</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="${values.ratingMin}"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="${values.ratingMax}"></label></div></div></div><label class="check"><input type="checkbox" name="subs" ${values.subs ? 'checked' : ''}><span><strong>Substitutes</strong> · buy 16 players: your XI plus 5 on the bench, including a second keeper. Starters tire in the second half; make up to five changes at half-time.</span></label><label class="check"><input type="checkbox" name="devMode" ${values.devMode ? 'checked' : ''}><span><strong>Dev mode</strong> · skip the auction. Every manager gets a full XI in the right positions, so you can go straight to the league.</span></label>`;
   }
-  const readRules = form => { const data = new FormData(form); return { capacity: +data.get('capacity'), formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on', competition: data.get('competition') === 'premier' ? 'premier' : 'friends' }; };
-  const ruleKeys = ['capacity', 'formation', 'mode', 'seasonFrom', 'seasonTo', 'ratingMin', 'ratingMax', 'devMode', 'competition'];
-  const savedRules = () => ({ capacity: room.capacity, ...room.config, devMode: room.config.devMode === true, competition: room.config.competition === 'premier' ? 'premier' : 'friends' });
+  const readRules = form => { const data = new FormData(form); return { capacity: +data.get('capacity'), formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on', subs: data.get('subs') === 'on', competition: data.get('competition') === 'premier' ? 'premier' : 'friends' }; };
+  const ruleKeys = ['capacity', 'formation', 'mode', 'seasonFrom', 'seasonTo', 'ratingMin', 'ratingMax', 'devMode', 'subs', 'competition'];
+  const savedRules = () => ({ capacity: room.capacity, ...room.config, devMode: room.config.devMode === true, subs: room.config.subs === true, competition: room.config.competition === 'premier' ? 'premier' : 'friends' });
   const matchesRoom = values => ruleKeys.every(key => values[key] === savedRules()[key]);
   function lobbyRules() {
     if (!room.isHost) return rules(room.config);
@@ -1388,7 +1481,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const allowed = open && !spinning && !out && !blocked && leader?.managerId !== room.me && connected && !busy && !(round.deadline && clock() >= round.deadline);
     const min = minBid(room), locked = open && leader?.managerId === room.me, broke = myBudget() === 0 && !myFull();
     const ended = round && !open;
-    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol line-${line(player.player.positions[0])}">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span>${positions(player.player.positions)}${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= 11, withdrew = round?.withdrawn.includes(member.managerId), cannot = !full && !withdrew && open && !round.active.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew || cannot ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : cannot ? (keeper ? 'Has a GK' : 'Needs a GK') : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="numeric" type="number" min="${min}" max="${myBudget()}" step="1" placeholder="${min}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10, 50].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>${leader?.managerId === room.me ? 'You’re the highest bidder' : 'Place bid'}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed || locked)}>${out ? 'You’re out for this player' : blocked ? blocked : locked ? 'Locked in · you’re the highest bidder' : 'Back out for this player'}</button>${broke && !out ? '<p class="hint">You’re out of money. If everyone else backs out, bid £0 to take this player for free.</p>' : ''}<p class="hint">Bids are whole millions, from £1m. First bid starts 60 seconds; every later bid adds 10 seconds. The highest bidder is locked in and can’t bid again until someone outbids them. If you’re outbid, you can bid again or back out.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
+    return `<div class="auction-layout"><div class="stack"><section class="panel player-card">${!player ? `${wheel(false)}<div class="eyebrow">The pool is a secret</div><h2>${room.status === 'complete' ? 'Every XI is drafted' : 'Who will you sign?'}</h2><p>${room.isHost ? 'Reveal the first player when everyone is ready.' : 'Your host will reveal the first player.'}</p>` : spinning ? `${wheel(true)}<div class="eyebrow">Finding your next signing</div><h2>Who’s it going to be?</h2><p>No peeking at the next player.</p>` : `<div class="player-symbol line-${line(player.player.positions[0])}">${esc(player.player.positions[0])}</div><div class="eyebrow">${ended ? round.status === 'sold' ? 'SIGNED' : 'UNSOLD · BACK IN THE POOL' : 'UP FOR AUCTION'}</div><h2>${esc(player.player.name)}</h2><div class="player-meta"><span class="pill">${esc(player.club?.name)} · ${esc(player.season.season)}</span>${positions(player.player.positions)}${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</div>${ended ? `<p>${round.status === 'sold' ? `${esc(memberName(round.winnerId))} signed them for <strong>${money(round.price)}</strong>` : 'Nobody signed this player.'}</p>` : ''}`}</section><section class="panel stack"><div class="row"><h3>Managers in the auction</h3><span class="hint">${room.members.length} managers</span></div><div class="bidders">${room.members.map(member => { const full = AuctionCore.purchases(room.game, member.managerId).length >= squadSize(), withdrew = round?.withdrawn.includes(member.managerId), cannot = !full && !withdrew && open && !round.active.includes(member.managerId); return `<div class="bidder ${leader?.managerId === member.managerId && open ? 'leader' : ''} ${full || withdrew || cannot ? 'out' : ''}"><strong>${esc(member.name)}</strong> · ${full ? 'XI full' : withdrew ? 'Out' : cannot ? (keeper ? 'Has a GK' : 'Needs a GK') : leader?.managerId === member.managerId && open ? 'Leading' : 'In'}<br>${money(AuctionCore.budget(room.game, member.managerId))} left</div>`; }).join('')}</div>${round?.bids.length && !spinning ? `<details><summary class="hint">Recent bids</summary>${round.bids.slice().reverse().map(bid => `<div class="sale-row"><span>${esc(memberName(bid.managerId))}${round.withdrawn.includes(bid.managerId) ? ' · withdrawn' : ''}</span><strong>${money(bid.price)}</strong></div>`).join('')}</details>` : ''}</section></div><section class="panel bid-panel"><div class="row"><div><div class="hint">${open ? 'Current highest bid' : 'Last sale'}</div><div class="bid-price">${open && leader ? money(leader.price) : ended && round.status === 'sold' ? money(round.price) : '—'}</div><p>${open && leader ? esc(memberName(leader.managerId)) : open ? 'Be the first to bid' : 'Ready for the next player'}</p></div><div id="timer" class="timer">${open ? round.deadline ? '1:00' : 'Waiting' : 'Ended'}</div></div>${open ? `<form id="bid-form" class="bid-form"><label for="bid-value" class="label">Your bid (£m)</label><input id="bid-value" inputmode="numeric" type="number" min="${min}" max="${myBudget()}" step="1" placeholder="${min}" value="${esc(bidText)}" ${disabled(!allowed)}><div class="increments">${[1, 5, 10, 50].map(value => `<button type="button" data-do="increment" data-id="${value}" ${disabled(!allowed)}>+£${value}m</button>`).join('')}</div><button class="primary" ${disabled(!allowed)}>${leader?.managerId === room.me ? 'You’re the highest bidder' : 'Place bid'}</button><button type="button" class="quiet danger" data-do="withdraw" ${disabled(!allowed || locked)}>${out ? 'You’re out for this player' : blocked ? blocked : locked ? 'Locked in · you’re the highest bidder' : 'Back out for this player'}</button>${broke && !out ? '<p class="hint">You’re out of money. If everyone else backs out, bid £0 to take this player for free.</p>' : ''}<p class="hint">Bids are whole millions, from £1m. First bid starts 60 seconds; every later bid adds 10 seconds. The highest bidder is locked in and can’t bid again until someone outbids them. If you’re outbid, you can bid again or back out.</p><p class="hint">${out ? 'You can bid again when the next player appears.' : 'The last manager in wins at their current bid. Otherwise, the highest active bid wins when time runs out.'}</p></form>` : `<p>${room.status === 'complete' ? 'Arrange everyone’s XI, review your bargains and big spends, then start the league.' : room.isHost ? 'Keep everyone guessing. Reveal the next player when you’re ready.' : 'Waiting for your host to reveal the next player.'}</p>`}${room.isHost && room.status === 'draft' ? `<button class="${open ? 'quiet' : 'primary'}" data-do="${open ? 'skip' : 'reveal'}" ${disabled(!connected || busy || open && !!leader || spinning)}>${open ? 'Skip unsold player' : 'Reveal next player →'}</button>` : ''}${room.status === 'complete' ? '<button data-do="tab" data-id="teams">Arrange your XI →</button><button class="primary" data-do="tab" data-id="league">Bargains & league →</button>' : ''}</section></div>${roomFooter()}`;
   }
   function skippedPlayers() {
     const queued = room.game.skipped || [];
@@ -1414,11 +1507,11 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       : target ? `Choose a squad player for ${target.position}${targetPlayer ? `, or tap another position to swap ${esc(targetPlayer.player.name)}` : ''}.`
       : 'Tap a position, then choose a player for it. Or drag players onto the pitch, and between positions to swap them.';
     const legend = `<div class="legend">${[['gk', 'Goalkeeper'], ['def', 'Defence'], ['mid', 'Midfield'], ['att', 'Attack']].map(([key, label]) => `<span class="pos pos-${key}">${label}</span>`).join('')}</div>`;
-    return `<div class="team-picker">${room.game.managers.map(manager => `<button data-do="team" data-id="${manager.id}" class="${teamId === manager.id ? 'selected' : ''}">${esc(manager.name)}${manager.id === room.me ? ' · You' : ''}</button>`).join('')}</div><div class="team-layout"><section class="panel stack"><div class="row"><h2>${esc(manager.name)}’s XI</h2>${room.game.config.formation === DraftCore.FREE && editable ? `<select id="my-formation" class="formation-pick" aria-label="Your formation" ${disabled(!connected || busy)}>${Object.keys(DraftCore.formations).map(value => `<option ${value === team.formation ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>` : `<span class="pill">${esc(team.formation)}</span>`}</div>${showRatings ? `<div class="stat-grid">${[['Attack', team.attack, 'att'], ['Midfield', team.midfield, 'mid'], ['Defence', team.defence, 'def'], ['GK', team.goalkeeping, 'gk']].map(([label, value, key]) => `<div class="stat line-${key}"><strong>${value || '—'}</strong>${label}</div>`).join('')}</div>` : ''}<div class="pitch"><div class="circle"></div><div class="box top-box"></div><div class="box bottom-box"></div>${slots.map((slot, index) => { const player = entry(manager.board[index]); return `<button class="slot line-${line(slot.position)} ${player ? 'filled' : ''} ${player && LeagueCore.fitMultiplier(slot.position, player.player.positions) === .93 ? 'misplaced' : ''} ${index === selectedSlot ? 'selected' : ''}" style="left:${slot.x}%;top:${slot.y}%" data-do="slot" data-id="${index}" data-drop-slot="${index}"${draggable(player)} ${disabled(!editable || !connected || busy)} aria-pressed="${index === selectedSlot}" aria-label="${esc(slot.position)}: ${esc(player?.player.name || 'Empty slot')}"><span class="role">${slot.position}</span><span class="name">${player ? esc(player.player.name) : '+'}</span>${player ? `<span class="paid">${money(paid(player.id))}</span>${showRatings ? `<span class="small-rating"> · ${rating(player)}</span>` : ''}` : ''}</button>`; }).join('')}</div>${legend}<p class="hint">${help} Dashed orange outlines show an unfamiliar position.</p></section><section class="panel stack"><div class="row"><h2>The squad</h2><span class="pill">${sales.length}/11 · ${money(AuctionCore.budget(room.game, teamId))} left</span></div>${editable ? `<div class="actions"><button data-do="autoPlace" ${disabled(!connected || busy || !sales.length)}>Arrange automatically</button><button class="quiet danger" data-do="clearBoard" ${disabled(!connected || busy || !placedCount)}>Clear the pitch</button>${targetPlayer ? `<button class="quiet" data-do="unplace" data-id="${esc(targetPlayer.id)}" ${disabled(!connected || busy)}>Take ${esc(targetPlayer.player.name)} off</button>` : ''}</div>` : ''}${target ? `<p class="pick-prompt">Choose a player for <span class="pos pos-${line(target.position)}">${target.position}</span></p>` : ''}<div class="squad-list ${target ? 'picking' : ''}"${editable ? ' data-drop-squad' : ''}>${squadOrder(sales).map((sale, index, list) => { const player = entry(sale.playerId), at = manager.board.indexOf(player.id); return `${groupHeading(list, index)}<button class="squad-player ${at >= 0 ? 'placed' : ''}" data-do="select-player" data-id="${esc(player.id)}"${draggable(player)} ${disabled(!editable)}><span><strong>${esc(player.player.name)}</strong><small>${positions(player.player.positions)} ${esc(player.season.season)}${at >= 0 ? ` · On pitch at ${slots[at].position}` : ''}</small></span><span>${money(sale.price)}${showRatings ? `<small> · ${rating(player)}</small>` : ''}</span></button>`; }).join('') || '<div class="empty">Your first signing is waiting in the auction.</div>'}</div>${editable && placedCount ? '<p class="hint">Drag a player from the pitch back to this list to take them off.</p>' : ''}${showRatings ? `<p class="hint">Team overall: ${team.overall || '—'}. Positions affect team strength in the league.</p>` : ''}</section></div>`;
+    return `<div class="team-picker">${room.game.managers.map(manager => `<button data-do="team" data-id="${manager.id}" class="${teamId === manager.id ? 'selected' : ''}">${esc(manager.name)}${manager.id === room.me ? ' · You' : ''}</button>`).join('')}</div><div class="team-layout"><section class="panel stack"><div class="row"><h2>${esc(manager.name)}’s XI</h2>${room.game.config.formation === DraftCore.FREE && editable ? `<select id="my-formation" class="formation-pick" aria-label="Your formation" ${disabled(!connected || busy)}>${Object.keys(DraftCore.formations).map(value => `<option ${value === team.formation ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>` : `<span class="pill">${esc(team.formation)}</span>`}</div>${showRatings ? `<div class="stat-grid">${[['Attack', team.attack, 'att'], ['Midfield', team.midfield, 'mid'], ['Defence', team.defence, 'def'], ['GK', team.goalkeeping, 'gk']].map(([label, value, key]) => `<div class="stat line-${key}"><strong>${value || '—'}</strong>${label}</div>`).join('')}</div>` : ''}<div class="pitch"><div class="circle"></div><div class="box top-box"></div><div class="box bottom-box"></div>${slots.map((slot, index) => { const player = entry(manager.board[index]); return `<button class="slot line-${line(slot.position)} ${player ? 'filled' : ''} ${player && LeagueCore.fitMultiplier(slot.position, player.player.positions) === .93 ? 'misplaced' : ''} ${index === selectedSlot ? 'selected' : ''}" style="left:${slot.x}%;top:${slot.y}%" data-do="slot" data-id="${index}" data-drop-slot="${index}"${draggable(player)} ${disabled(!editable || !connected || busy)} aria-pressed="${index === selectedSlot}" aria-label="${esc(slot.position)}: ${esc(player?.player.name || 'Empty slot')}"><span class="role">${slot.position}</span><span class="name">${player ? esc(player.player.name) : '+'}</span>${player ? `<span class="paid">${money(paid(player.id))}</span>${showRatings ? `<span class="small-rating"> · ${rating(player)}</span>` : ''}` : ''}</button>`; }).join('')}</div>${legend}<p class="hint">${help} Dashed orange outlines show an unfamiliar position.</p></section><section class="panel stack"><div class="row"><h2>The squad</h2><span class="pill">${sales.length}/${squadSize()} · ${money(AuctionCore.budget(room.game, teamId))} left</span></div>${editable ? `<div class="actions"><button data-do="autoPlace" ${disabled(!connected || busy || !sales.length)}>Arrange automatically</button><button class="quiet danger" data-do="clearBoard" ${disabled(!connected || busy || !placedCount)}>Clear the pitch</button>${targetPlayer ? `<button class="quiet" data-do="unplace" data-id="${esc(targetPlayer.id)}" ${disabled(!connected || busy)}>Take ${esc(targetPlayer.player.name)} off</button>` : ''}</div>` : ''}${target ? `<p class="pick-prompt">Choose a player for <span class="pos pos-${line(target.position)}">${target.position}</span></p>` : ''}<div class="squad-list ${target ? 'picking' : ''}"${editable ? ' data-drop-squad' : ''}>${squadOrder(sales).map((sale, index, list) => { const player = entry(sale.playerId), at = manager.board.indexOf(player.id); return `${groupHeading(list, index)}<button class="squad-player ${at >= 0 ? 'placed' : ''}" data-do="select-player" data-id="${esc(player.id)}"${draggable(player)} ${disabled(!editable)}><span><strong>${esc(player.player.name)}</strong><small>${positions(player.player.positions)} ${esc(player.season.season)}${at >= 0 ? ` · On pitch at ${slots[at].position}` : room.game.config.subs ? ' · Bench' : ''}</small></span><span>${money(sale.price)}${showRatings ? `<small> · ${rating(player)}</small>` : ''}</span></button>`; }).join('') || '<div class="empty">Your first signing is waiting in the auction.</div>'}</div>${editable && placedCount ? '<p class="hint">Drag a player from the pitch back to this list to take them off.</p>' : ''}${showRatings ? `<p class="hint">Team overall: ${team.overall || '—'}. Positions affect team strength in the league.</p>` : ''}</section></div>`;
   }
   function transfersScreen() { return `<section class="panel stack"><div class="row"><h2>Transfer board</h2><span class="pill">${room.game.sales.length} signings</span></div><p>Every deal, ordered from the biggest fee to the smallest.</p><div>${room.game.sales.slice().sort((a, b) => b.price - a.price).map((sale, i) => { const player = entry(sale.playerId); return `<div class="sale-row"><span class="muted">${i + 1}</span><div style="flex:1"><strong>${esc(player.player.name)} ${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</strong><small>${positions(player.player.positions)} ${esc(memberName(sale.managerId))} · ${esc(player.season.season)}</small></div><span class="price">${money(sale.price)}</span><button class="quiet" data-do="team" data-id="${sale.managerId}" aria-label="View ${esc(memberName(sale.managerId))}’s team">XI</button></div>`; }).join('') || '<div class="empty">No deals yet. The auction is where it all starts.</div>'}</div></section>`; }
   const liveNow = () => room?.live && clock() < room.live.endsAt ? room.live : null;
-  const liveClock = live => Math.max(0, Math.min(MatchView.END, (clock() - live.startsAt) / (live.endsAt - live.startsAt) * MatchView.END));
+  const liveClock = live => { const from = live.from ?? 0, to = live.to ?? MatchView.END; return Math.max(from, Math.min(to, from + (clock() - live.startsAt) / (live.endsAt - live.startsAt) * (to - from))); };
   const liveMinute = live => Math.floor(liveClock(live));
   const clockLabel = value => value <= 45 ? `${value}′` : value <= 48 ? `45+${value - 45}′` : value <= 93 ? `${value - 3}′` : `90+${value - 93}′`;
   const pitchColours = { home: '#6cb4ff', homeKeeper: '#ffd84d', away: '#ff7b7b', awayKeeper: '#c792ff' };
@@ -1427,15 +1520,16 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return fixtures.find(fixture => fixture.id === watchFixture) || fixtures.find(fixture => fixture.homeId === room.me || fixture.awayId === room.me) || fixtures[0];
   }
   function timelineFor(live, fixture) {
-    const key = `${room.id}:${live.startsAt}:${fixture.id}`;
+    const key = `${room.id}:${live.startsAt}:${fixture.id}:${live.from ?? 0}`;
     if (!timelines.has(key)) {
       if (timelines.size > 20) timelines.clear();
       const team = id => room.league.teams.find(team => team.id === id), index = liveFixtures(live).indexOf(fixture);
-      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0, duration: (live.endsAt - live.startsAt) / 1000 }));
+      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0, duration: (live.endsAt - live.startsAt) / 1000, from: live.from ?? 0, to: live.to ?? MatchView.END }));
     }
     return timelines.get(key);
   }
-  const liveFixtures = live => room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))));
+  const liveFixtures = live => room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))))
+    .map(fixture => fixture.result ? fixture : { ...fixture, result: room.league.pending?.firstHalf?.[fixture.id] }).filter(fixture => fixture.result);
   const realSeconds = live => Math.max(0, (clock() - live.startsAt) / 1000);
   const fixtureClock = (live, fixture) => live.view === 'pitch' ? MatchView.clockAt(timelineFor(live, fixture), realSeconds(live)) : liveClock(live);
   const goalsNow = live => liveFixtures(live).reduce((sum, fixture) => { const minute = fixtureClock(live, fixture); return sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length; }, 0);
@@ -1501,6 +1595,25 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     }).join('');
     return `<div class="stack"><section class="panel stack summary-hero"><div class="eyebrow">Full time · Season complete</div><h2>${champions.map(row => esc(row.name)).join(' & ')} ${champions.length > 1 ? 'are joint champions!' : isManager(top.id) || !premier() ? 'are champions!' : 'win the league'}</h2>${premier() && !isManager(top.id) ? `<p>Best of the managers: <strong>${esc(managerRows[0].row.name)}</strong> in ${managerRows[0].index + 1}${['st', 'nd', 'rd'][managerRows[0].index] || 'th'} place.</p>` : ''}<p>${top.points} points from ${top.played} games · ${top.won} wins · ${top.gf} goals</p><div class="summary-stats">${stat('Goals this season', goals, `${(goals / Math.max(1, played.length)).toFixed(1)} per game`)}${biggest ? stat('Biggest win', `${biggest.result.homeGoals} – ${biggest.result.awayGoals}`, `${esc(teamName(biggest.homeId))} v ${esc(teamName(biggest.awayId))}`) : ''}${boot.length ? stat('Golden boot', esc(boot[0].name), `${boot[0].goals} goals · ${esc(teamName(boot[0].managerId))}`) : ''}${topAssists(league).length ? stat('Most assists', esc(topAssists(league)[0].name), `${topAssists(league)[0].assists} assists · ${esc(teamName(topAssists(league)[0].managerId))}`) : ''}${stat('Players signed', game.sales.length, `${money(game.sales.reduce((sum, sale) => sum + sale.price, 0))} spent in total`)}</div><div class="actions">${next ? `<button class="primary" data-do="rematch" ${disabled(busy)}>Join the new game · room ${esc(next.code)} →</button>` : `<button class="primary" data-do="rematch" ${disabled(busy)}>Play again · same rules →</button>`}<button class="quiet" data-do="leave">Leave the room</button></div><p class="hint">${next ? 'A fresh lobby with the same rules is waiting for you.' : 'Play again opens a fresh lobby with a new code and the same rules. Everyone else can join it from this screen.'}</p></section><section class="panel stack"><h2>Final table</h2>${standings(rows)}</section><section class="panel stack"><h2>How every team did</h2>${teams}</section>${awardsReport(awards)}</div>`;
   }
+  function halfTimePanel() {
+    const pending = room.league.pending, fixtures = room.league.fixtures.filter(fixture => pending.firstHalf[fixture.id]);
+    const mine = fixtures.find(fixture => fixture.homeId === room.me || fixture.awayId === room.me);
+    const scores = fixtures.map(fixture => fixtureCard({ ...fixture, result: pending.firstHalf[fixture.id] })).join('');
+    let changesPanel = '';
+    if (mine) {
+      const side = mine.homeId === room.me ? 'home' : 'away', snapshot = room.league.teams.find(team => team.id === room.me), made = pending.changes[mine.id]?.[side] || [];
+      const onPitch = LeagueCore.lineupAfter(snapshot, made), used = new Set(made.map(change => change.on)), bench = snapshot.bench.filter(player => !used.has(player.id));
+      const energy = player => Math.round(100 - (player.fresh ? 0 : (LeagueCore.FATIGUE[player.position] || .05) * 100));
+      changesPanel = `<div class="stack"><div class="row"><h3>Your changes · ${made.length}/5</h3>${pending.ready[room.me] ? '<span class="pill green">Ready</span>' : ''}</div>
+        <div class="subs-grid"><div><div class="hint">On the pitch · energy for the second half</div>${onPitch.map(player => `<label class="sub-option"><input type="radio" name="sub-off" value="${esc(player.id)}" ${selectedOff === player.id ? 'checked' : ''}><span class="pos pos-${line(player.position)}">${player.position}</span><span class="grow">${esc(player.name)}${player.fresh ? ' <small>sub</small>' : ''}</span><span class="energy" title="Second-half strength"><span style="width:${Math.max(6, (energy(player) - 88) / 12 * 100)}%"></span></span><small class="energy-label">${energy(player)}%</small></label>`).join('')}</div>
+        <div><div class="hint">Bench</div>${bench.map(player => `<label class="sub-option"><input type="radio" name="sub-on" value="${esc(player.id)}" ${selectedOn === player.id ? 'checked' : ''}>${positions(player.positions)}<span class="grow">${esc(player.name)}</span>${showRatings ? `<span class="rating">${Math.round(player.rating)}</span>` : ''}</label>`).join('') || '<p class="hint">Everyone on your bench is already on.</p>'}</div></div>
+        ${made.length ? `<div class="hint">${made.map(change => `${esc(onPitchName(snapshot, change.off))} ⇄ ${esc(onPitchName(snapshot, change.on))}`).join(' · ')}</div>` : ''}
+        <div class="actions"><button class="primary" data-do="make-sub" ${disabled(!connected || busy || made.length >= 5 || !bench.length)}>Make substitution</button>${made.length ? `<button class="quiet" data-do="undoSub" ${disabled(!connected || busy)}>Undo last</button>` : ''}<button class="${pending.ready[room.me] ? 'quiet' : ''}" data-do="ready-half" ${disabled(!connected || busy)}>${pending.ready[room.me] ? 'Not ready' : 'Ready for the second half'}</button></div></div>`;
+    }
+    const managers = fixtures.flatMap(fixture => [fixture.homeId, fixture.awayId]).filter(isManager), readyCount = managers.filter(id => pending.ready[id]).length;
+    return `<section class="panel stack live-panel"><div class="row"><div><div class="eyebrow live-label">Half-time · Matchday ${pending.round + 1}</div><h2 class="gap-top">The managers make their changes</h2></div><span class="pill">${readyCount}/${managers.length} ready</span></div>${scores}${changesPanel}${room.isHost ? `<button class="primary" data-do="secondHalf" ${disabled(!connected || busy)}>Kick off the second half →</button>` : '<p class="hint">Your host kicks off the second half.</p>'}<p class="hint">Starters tire after the break, wide players and full-backs most. Fresh legs from the bench play at full strength.</p></section>`;
+  }
+  const onPitchName = (snapshot, id) => [...snapshot.squad, ...(snapshot.bench || [])].find(player => player.id === id)?.name || '';
   function leagueScreen() {
     const game = room.game;
     if (room.status !== 'complete') return `<section class="panel stack"><div class="eyebrow">After the auction</div><h2>Your league is coming</h2><p>Once all ${game.totalPlayers} players are signed, we’ll reveal the bargains and big spends. Arrange every XI, then everyone plays each other home and away.</p><button data-do="tab" data-id="auction">Back to the auction</button></section>`;
@@ -1511,7 +1624,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const live = liveNow(), shown = live ? { ...league, round: live.round, fixtures: league.fixtures.map(fixture => fixture.round === live.round ? { ...fixture, result: null } : fixture) } : league;
     const finished = !live && league.round >= count, rows = LeagueCore.table(shown);
     const scorers = goldenBoot(shown);
-    return `<div class="stack">${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.isHost ? `${matchViewControl()}<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button>${premier() && room.league.nextDerby !== null && room.league.nextDerby > room.league.round ? `<button data-do="skipToDerby" ${disabled(!connected || busy || !!live)}>Skip to the next manager match · matchday ${room.league.nextDerby + 1}</button>` : ''}<button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>` : ''}</section><section class="panel stack"><div class="row"><h2>Fixtures & results</h2>${premier() ? `<button class="quiet" data-do="all-fixtures">${allFixtures ? 'Only manager games' : 'Every game'}</button>` : ''}</div>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round && (!premier() || allFixtures || isManager(fixture.homeId) || isManager(fixture.awayId))).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goal${scorer.goals === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}${topAssists(shown).length ? `<section class="panel stack"><h2>Most assists</h2>${topAssists(shown).slice(0, 10).map(player => `<div class="sale-row"><strong>${esc(player.name)}</strong><span class="price">${player.assists} assist${player.assists === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
+    return `<div class="stack">${room.league.pending && !live ? halfTimePanel() : ''}${live ? `<section id="live-matchday" class="panel stack live-panel">${liveInner(live)}</section>` : ''}<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Season complete' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} are champions!` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}${finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>' : room.league.pending ? '' : room.isHost ? `${matchViewControl()}<div class="actions"><button class="primary" data-do="playRound" ${disabled(!connected || busy || !!live)}>${live ? 'Matchday in play…' : `Play matchday ${league.round + 1} →`}</button>${premier() && room.league.nextDerby !== null && room.league.nextDerby > room.league.round ? `<button data-do="skipToDerby" ${disabled(!connected || busy || !!live)}>Skip to the next manager match · matchday ${room.league.nextDerby + 1}</button>` : ''}<button class="quiet" data-do="finishLeague" ${disabled(!connected || busy || !!live)}>Simulate remaining season</button></div>` : !finished ? `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>` : ''}</section><section class="panel stack"><div class="row"><h2>Fixtures & results</h2>${premier() ? `<button class="quiet" data-do="all-fixtures">${allFixtures ? 'Only manager games' : 'Every game'}</button>` : ''}</div>${Array.from({ length: count }, (_, round) => `<details ${round === Math.max(0, shown.round - 1) ? 'open' : ''}><summary>Matchday ${round + 1}${live && round === live.round ? ' · In play' : round >= shown.round ? ' · Upcoming' : ''}</summary>${shown.fixtures.filter(fixture => fixture.round === round && (!premier() || allFixtures || isManager(fixture.homeId) || isManager(fixture.awayId))).map(fixture => fixtureCard(fixture)).join('')}</details>`).join('')}</section>${scorers.length ? `<section class="panel stack"><h2>Golden boot</h2>${scorers.slice(0, 10).map(scorer => `<div class="sale-row"><strong>${esc(scorer.name)}</strong><span class="price">${scorer.goals} goal${scorer.goals === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}${topAssists(shown).length ? `<section class="panel stack"><h2>Most assists</h2>${topAssists(shown).slice(0, 10).map(player => `<div class="sale-row"><strong>${esc(player.name)}</strong><span class="price">${player.assists} assist${player.assists === 1 ? "" : "s"}</span></div>`).join('')}</section>` : ''}<details><summary>Bargains & big spends</summary><div class="gap-top">${report}</div></details></div>`;
   }
   function render() {
     const focus = document.activeElement, focusId = focus?.id, value = focus && ['INPUT', 'SELECT'].includes(focus.tagName) ? focus.value : null;
@@ -1541,9 +1654,9 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   function updateLive() {
     const live = liveNow(), key = live ? `${room.id}:${live.round}:${live.startsAt}` : null;
     if (key !== liveKey) {
-      if (liveKey && !key) { liveKey = null; sound.whistle(); if (summaryPending) { summaryPending = false; tab = 'summary'; } render(); return; }
+      if (liveKey && !key) { liveKey = null; sound.whistle(); if (room.league?.pending) tab = 'league'; if (summaryPending) { summaryPending = false; tab = 'summary'; } render(); return; }
       liveKey = key; shownMinute = -1; liveGoals = goalsNow(live);
-      if (liveMinute(live) < 2) sound.whistle();
+      if (liveClock(live) - (live.from ?? 0) < 2) sound.whistle();
     }
     if (!live) return;
     // Refresh the score, clock and commentary whenever the minute or the shown events change.
@@ -1569,7 +1682,11 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   $('#sound-toggle').addEventListener('click', () => { sound.toggle(); render(); });
   document.addEventListener('pointerdown', () => sound.unlock(), true);
   $('#rating-toggle').addEventListener('click', () => action('ratings', { show: !showRatings }));
-  $('#app').addEventListener('change', event => { if (event.target.id === 'my-formation') action('formation', { formation: event.target.value }); });
+  $('#app').addEventListener('change', event => {
+    if (event.target.id === 'my-formation') action('formation', { formation: event.target.value });
+    if (event.target.name === 'sub-off') selectedOff = event.target.value;
+    if (event.target.name === 'sub-on') selectedOn = event.target.value;
+  });
   $('#app').addEventListener('input', event => {
     if (event.target.id === 'bid-value') bidText = event.target.value;
     if (event.target.form?.id === 'rules-form') queueMicrotask(() => { const form = $('#rules-form'); if (!form) return; rulesDraft = readRules(form); form.querySelector('button.primary').disabled = matchesRoom(rulesDraft) || !connected || busy; });
@@ -1591,7 +1708,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const data = new FormData(form), displayName = String(data.get('name') || '').trim(); storage.set('name', displayName);
     let body;
     if (form.id === 'join-form') body = { name: displayName, code: String(data.get('code') || '') };
-    else if (form.id === 'create-form') body = { name: displayName, capacity: +data.get('capacity'), config: { formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on', competition: data.get('competition') === 'premier' ? 'premier' : 'friends' } };
+    else if (form.id === 'create-form') body = { name: displayName, capacity: +data.get('capacity'), config: { formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on', subs: data.get('subs') === 'on', competition: data.get('competition') === 'premier' ? 'premier' : 'friends' } };
     else return;
     busy = true; form.querySelector('button[type=submit],button:not([type])').disabled = true;
     try { await api(form.id === 'join-form' ? '/api/join' : '/api/create', body); connect(); }
@@ -1628,6 +1745,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     }
     if (type === 'leave') { leaveRoom(); render(); return; }
     if (type === 'all-fixtures') { allFixtures = !allFixtures; render(); return; }
+    if (type === 'make-sub') { if (!selectedOff || !selectedOn) return toast('Pick a player to come off and one to come on.'); const off = selectedOff, on = selectedOn; selectedOff = selectedOn = null; return action('substitute', { off, on }); }
+    if (type === 'ready-half') return action('readyHalf', { ready: !room.league.pending?.ready?.[room.me] });
     if (type === 'resume' && resumable) { const id = resumable.id; busy = true; render(); try { await api(`/api/room/${id}`); connect(); } catch (error) { toast(error.message); storage.set('room', null); resumable = null; } finally { busy = false; render(); } return; }
     if (type === 'forget') { storage.set('room', null); resumable = null; render(); return; }
     if (type === 'discard-rules') { rulesDraft = null; render(); return; }

@@ -36,6 +36,7 @@ The hosted game is at `/`, and the original shared-device game is at `/offline.h
 
 ## Online auction rules
 
+- **Substitutes** (a Room rules switch, Touchline's own rules since 38-0 has no substitutions): every manager buys 16 players, an XI plus five on the bench including a second keeper. In manager v manager games each half is simulated separately with half the expected goals. The first half plays live, then everyone sees half-time: each manager can make up to five changes from their bench and mark themselves ready, and the host kicks off the second half. Starters tire after the break (keepers 1%, centre-backs 4%, midfielders and strikers 6%, wide players and full-backs 7–8% weaker); substitutes play at full strength. Instantly simulated matchdays make up to three sensible changes automatically.
 - **League format**: "Just us" (managers play each other home and away) or **Premier League** (the managers join 38-0's clubs in a 20-team, 38-matchday season; games against clubs are instant, manager v manager games play live, and the host can skip ahead to the next manager match).
 - Host selects 2–8 managers, formation (or **Free**, where each manager picks their own formation on the Teams screen until the league starts), peak/season rating mode, season range and rating range. The host can change any of these in the lobby under **Room rules**; saving new rules asks everyone to ready up again. The rules lock when the auction starts.
 - Squad lists are grouped by main position: goalkeeper, defence, midfield, attack.

@@ -35,16 +35,12 @@
     const rank = naturalRank(position, positions);
     return rank === 0 ? 1 : rank === 1 ? .99 : rank >= 2 ? .98 : .93;
   }
-  function team(game, manager) {
-    const formation = draft.formationOf(game, manager), slots = draft.formations[formation];
-    const pool = new Map(game.pool.map(entry => [entry.id, entry]));
-    const backFive = slots.filter(slot => slot.position === 'CB').length === 3 && formation.startsWith('5-');
-    const squad = slots.flatMap((slot, index) => {
-      const entry = pool.get(manager.board[index]);
-      if (!entry) return [];
-      const rating = draft.rating(entry, game.config.mode), fit = fitMultiplier(slot.position, entry.player.positions);
-      const unit = ['LWB', 'RWB'].includes(slot.position) ? (backFive ? 'defence' : 'midfield') : units[slot.position];
-      return [{ id: entry.id, name: entry.player.name, position: slot.position, positions: entry.player.positions.slice(), rating, effective: Math.max(40, rating * fit), fit, unit }];
+  // Team strength from the players in each slot: position fit, units and weights as 38-0 does it.
+  function rate(entries, formation) {
+    const backFive = draft.formations[formation].filter(slot => slot.position === 'CB').length === 3 && formation.startsWith('5-');
+    const squad = entries.map(entry => {
+      const fit = fitMultiplier(entry.position, entry.positions), unit = ['LWB', 'RWB'].includes(entry.position) ? (backFive ? 'defence' : 'midfield') : units[entry.position];
+      return { ...entry, effective: Math.max(40, entry.rating * fit), fit, unit };
     });
     const exact = {};
     for (const unit of Object.keys(unitWeights)) {
@@ -55,10 +51,43 @@
     const present = Object.keys(unitWeights).filter(unit => exact[unit] > 0);
     const denominator = present.reduce((sum, unit) => sum + unitWeights[unit], 0);
     const overall = denominator ? Math.round(present.reduce((sum, unit) => sum + exact[unit] * unitWeights[unit], 0) / denominator) : 0;
-    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), squad, overall,
-      ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])),
-      placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length,
+    return { squad, overall, ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])), placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length };
+  }
+  function team(game, manager) {
+    const formation = draft.formationOf(game, manager), slots = draft.formations[formation];
+    const pool = new Map(game.pool.map(entry => [entry.id, entry]));
+    const describe = (entry, position) => ({ id: entry.id, name: entry.player.name, position, positions: entry.player.positions.slice(), rating: draft.rating(entry, game.config.mode) });
+    const entries = slots.flatMap((slot, index) => { const entry = pool.get(manager.board[index]); return entry ? [describe(entry, slot.position)] : []; });
+    const bench = game.config.subs ? auction.purchases(game, manager.id).filter(sale => !manager.board.includes(sale.playerId)).map(sale => describe(pool.get(sale.playerId), pool.get(sale.playerId).player.positions[0])) : undefined;
+    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), ...rate(entries, formation), ...(bench ? { bench } : {}),
       spent: auction.STARTING_BUDGET - auction.budget(game, manager.id) };
+  }
+  // Substitutes mode (Touchline's own rules; 38-0 has no substitutions). Starters tire in the
+  // second half by position; players coming off the bench are fresh.
+  const FATIGUE = { GK: .01, CB: .04, LB: .07, RB: .07, LWB: .08, RWB: .08, CDM: .05, CM: .06, CAM: .06, LM: .07, RM: .07, LW: .07, RW: .07, ST: .06 };
+  function lineupAfter(snapshot, changes = []) {
+    const players = snapshot.squad.map(player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating, fresh: false }));
+    for (const change of changes) {
+      const index = players.findIndex(player => player.id === change.off), incoming = snapshot.bench.find(player => player.id === change.on);
+      if (index >= 0 && incoming) players[index] = { id: incoming.id, name: incoming.name, position: players[index].position, positions: incoming.positions, rating: incoming.rating, fresh: true };
+    }
+    return players;
+  }
+  function secondHalfTeam(snapshot, changes = []) {
+    const entries = lineupAfter(snapshot, changes).map(player => ({ ...player, rating: player.rating * (1 - (player.fresh ? 0 : FATIGUE[player.position] || .05)) }));
+    return { ...snapshot, ...rate(entries, snapshot.formation) };
+  }
+  // Instant matchdays make up to three sensible changes: the most tired outfield starters for the best bench fit.
+  function autoChanges(snapshot) {
+    if (!snapshot.bench?.length) return [];
+    const changes = [], used = new Set();
+    const tired = snapshot.squad.filter(player => player.position !== 'GK').sort((a, b) => (FATIGUE[b.position] || 0) - (FATIGUE[a.position] || 0) || a.rating - b.rating);
+    for (const starter of tired) {
+      if (changes.length >= 3) break;
+      const option = snapshot.bench.filter(player => !used.has(player.id) && !player.positions.includes('GK') && naturalRank(starter.position, player.positions) >= 0).sort((a, b) => b.rating - a.rating)[0];
+      if (option && option.rating >= starter.rating * (1 - (FATIGUE[starter.position] || .05)) - 2) { used.add(option.id); changes.push({ off: starter.id, on: option.id }); }
+    }
+    return changes;
   }
   function readiness(game) {
     if (game.phase !== 'complete') return { ready: false, message: 'Finish the auction before starting your league.' };
@@ -111,10 +140,11 @@
   const fromAbsolute = value => value <= 45 ? { minute: value } : value <= 48 ? { minute: 45, stoppage: value - 45 } : value <= 93 ? { minute: value - 3 } : { minute: 90, stoppage: value - 93 };
   const minuteLabel = goal => goal.stoppage ? `${goal.minute}+${goal.stoppage}′` : `${goal.minute}′`;
   // As in 38-0, no two goals in a match share a minute: clashes move later, within the final whistle.
-  function separate(...lists) {
+  function separate(...lists) { spread(97, 1, lists); }
+  function spread(last, first, lists) {
     const goals = lists.flat().sort(goalOrder), times = goals.map(absoluteMinute);
     for (let index = 1; index < times.length; index++) if (times[index] <= times[index - 1]) times[index] = times[index - 1] + 1;
-    for (let index = times.length - 1; index >= 0; index--) { const limit = index === times.length - 1 ? 97 : times[index + 1] - 1; if (times[index] > limit) times[index] = Math.max(1, limit); }
+    for (let index = times.length - 1; index >= 0; index--) { const limit = index === times.length - 1 ? last : times[index + 1] - 1; if (times[index] > limit) times[index] = Math.max(first, limit); }
     goals.forEach((goal, index) => { const time = fromAbsolute(times[index]); goal.minute = time.minute; if (time.stoppage === undefined) delete goal.stoppage; else goal.stoppage = time.stoppage; });
     for (const list of lists) list.sort(goalOrder);
   }
@@ -244,12 +274,50 @@
     });
   }
   const isManagerTeam = item => !item.club;
+  // One half of a substitutes-mode match: half the expected goals, goal times inside that half.
+  function simulateHalf(home, away, seed, tallies, half) {
+    const random = seeded((seed ^ (half === 1 ? 0x2c1b3c6d : 0x68e31da4)) >>> 0), assists = seeded((seed ^ (half === 1 ? 0x51a7c0de : 0x3b9aca07)) >>> 0);
+    const homeXg = expectedGoals(home.overall, away.overall, true) / 2, awayXg = expectedGoals(away.overall, home.overall, false) / 2;
+    const homeGoals = poisson(homeXg, random), awayGoals = poisson(awayXg, random);
+    const place = goal => { const target = half === 1 ? clamp(Math.round(absoluteMinute(goal) * 48 / 97), 1, 48) : clamp(49 + Math.round(absoluteMinute(goal) * 48 / 97), 49, 97), time = fromAbsolute(target); goal.minute = time.minute; if (time.stoppage === undefined) delete goal.stoppage; else goal.stoppage = time.stoppage; return goal; };
+    const homeScorers = goalEvents(home.squad, homeGoals, random, tallies, assists).map(place), awayScorers = goalEvents(away.squad, awayGoals, random, tallies, assists).map(place);
+    spread(half === 1 ? 48 : 97, half === 1 ? 1 : 49, [homeScorers, awayScorers]);
+    return { homeGoals, awayGoals, homeXg, awayXg, homeScorers, awayScorers };
+  }
+  const tallyOf = (league, extra = []) => { const tallies = new Map(); for (const result of [...league.fixtures.map(fixture => fixture.result), ...extra]) if (result) for (const scorer of [...result.homeScorers, ...result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1); return tallies; };
+  // Substitutes mode: kick off a matchday's first halves; the second halves wait for the managers' changes.
+  function startRound(league) {
+    if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
+    const teams = new Map(league.teams.map(item => [item.id, item])), tallies = tallyOf(league), firstHalf = {};
+    for (const fixture of league.fixtures) if (fixture.round === league.round && !league.planned?.[fixture.id]) firstHalf[fixture.id] = simulateHalf(teams.get(fixture.homeId), teams.get(fixture.awayId), hash(league.seed, fixture.id), tallies, 1);
+    return { league: { ...league, pending: { round: league.round, firstHalf, changes: {}, ready: {} } } };
+  }
+  function finishRound(league, changes = league.pending?.changes || {}) {
+    if (!league.pending) return { error: 'Kick off the first half first.' };
+    const teams = new Map(league.teams.map(item => [item.id, item])), firstHalf = league.pending.firstHalf, tallies = tallyOf(league, Object.values(firstHalf)), used = {};
+    const fixtures = league.fixtures.map(fixture => {
+      if (fixture.round !== league.round) return fixture;
+      if (league.planned?.[fixture.id]) return { ...fixture, result: league.planned[fixture.id] };
+      const made = { home: changes[fixture.id]?.home || [], away: changes[fixture.id]?.away || [] };
+      used[fixture.id] = made;
+      const a = firstHalf[fixture.id], b = simulateHalf(secondHalfTeam(teams.get(fixture.homeId), made.home), secondHalfTeam(teams.get(fixture.awayId), made.away), hash(league.seed, fixture.id), tallies, 2);
+      return { ...fixture, result: { homeGoals: a.homeGoals + b.homeGoals, awayGoals: a.awayGoals + b.awayGoals, homeXg: a.homeXg + b.homeXg, awayXg: a.awayXg + b.awayXg, homeScorers: [...a.homeScorers, ...b.homeScorers], awayScorers: [...a.awayScorers, ...b.awayScorers], halfTime: { home: a.homeGoals, away: a.awayGoals }, subs: made } };
+    });
+    return { league: { ...league, fixtures, round: league.round + 1, pending: null, subs: { ...league.subs, ...used } } };
+  }
+  // Instant play in substitutes mode: both halves, with automatic changes for every side.
+  function playWithSubs(league) {
+    const started = startRound(league); if (started.error) return started;
+    const teams = new Map(league.teams.map(item => [item.id, item])), changes = {};
+    for (const id of Object.keys(started.league.pending.firstHalf)) { const fixture = league.fixtures.find(item => item.id === id); changes[id] = { home: autoChanges(teams.get(fixture.homeId)), away: autoChanges(teams.get(fixture.awayId)) }; }
+    return finishRound(started.league, changes);
+  }
   function create(game, seed = Math.floor(Math.random() * 4294967296), { clubs = [] } = {}) {
     const check = readiness(game);
     if (!check.ready) return { error: check.message };
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) return { error: 'Invalid league seed.' };
     const teams = [...game.managers.map(manager => team(game, manager)), ...clubs.map(club => ({ ...club, club: true, overall: club.strength }))];
-    const league = { version: 1, engineVersion: VERSION, seed, round: 0, competition: clubs.length ? 'premier' : 'friends', teams, fixtures: schedule(teams.map(item => item.id)) };
+    const league = { version: 1, engineVersion: VERSION, seed, round: 0, competition: clubs.length ? 'premier' : 'friends', teams, fixtures: schedule(teams.map(item => item.id)), ...(game.config.subs ? { subs: {}, pending: null } : {}) };
     if (clubs.length) league.planned = plan(league);
     return { league };
   }
@@ -270,6 +338,7 @@
   const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
   function playRound(league) {
     if (league.round >= roundCount(league)) return { error: 'The league is finished.' };
+    if (league.subs) return playWithSubs(league);
     const teams = new Map(league.teams.map(team => [team.id, team]));
     const tallies = new Map();
     for (const fixture of league.fixtures) if (fixture.result) for (const scorer of [...fixture.result.homeScorers, ...fixture.result.awayScorers]) tallies.set(scorer.playerId, (tallies.get(scorer.playerId) || 0) + 1);
@@ -304,7 +373,7 @@
     return { biggestBuy, bargain, biggestSpender };
   }
   function serialise(league) {
-    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: team.board })) } : null;
+    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', ...(league.subs ? { subs: league.subs, pending: league.pending ? { round: league.pending.round, changes: league.pending.changes, ready: league.pending.ready } : null } : {}), boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: team.board })) } : null;
   }
   function restore(saved, game, { clubs = [] } = {}) {
     try {
@@ -313,10 +382,16 @@
       if ((saved.competition || 'friends') !== (clubs.length ? 'premier' : 'friends')) return null;
       let league = create(game, saved.seed, { clubs }).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
+      if (league.subs) {
+        // Replay with the changes the managers actually made, then reopen any half-time in progress.
+        for (let round = 0; round < saved.round; round++) { league = startRound(league).league; league = finishRound(league, Object.fromEntries(league.fixtures.filter(fixture => fixture.round === round).map(fixture => [fixture.id, saved.subs?.[fixture.id] || { home: [], away: [] }]))).league; }
+        if (saved.pending) { if (saved.pending.round !== saved.round) return null; league = startRound(league).league; league.pending.changes = saved.pending.changes || {}; league.pending.ready = saved.pending.ready || {}; }
+        return league;
+      }
       for (let round = 0; round < saved.round; round++) league = playRound(league).league;
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, FATIGUE, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);

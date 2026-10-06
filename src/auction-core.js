@@ -16,11 +16,12 @@
       return seasons.length ? [{ player, seasons }] : [];
     });
   }
-  function balance(eligible, formation, managerCount, random = Math.random) {
+  function balance(eligible, formation, managerCount, random = Math.random, subs = false) {
     const shape = draft.poolShape(formation);
     if (!shape || !Number.isInteger(managerCount) || managerCount < 2 || managerCount > 8) return { error: 'Choose a formation and between 2 and 8 managers.' };
-    if (eligible.length < managerCount * 11) return { error: `You need at least ${managerCount * 11} different players. Widen your season or rating range.` };
-    const needs = Array.from({ length: managerCount }, () => shape.map(slot => slot.position)).flat();
+    const size = subs ? 16 : 11;
+    if (eligible.length < managerCount * size) return { error: `You need at least ${managerCount * size} different players. Widen your season or rating range.` };
+    const needs = Array.from({ length: managerCount }, () => [...shape.map(slot => slot.position), ...(subs ? draft.BENCH : [])]).flat();
     const byPosition = new Map();
     for (const position of new Set(needs)) {
       const indexes = eligible.flatMap((entry, i) => {
@@ -51,7 +52,7 @@
   }
   function makePool(players, config, random = Math.random) {
     const eligible = candidates(players, config);
-    const result = balance(eligible, config.formation, config.managerCount, random);
+    const result = balance(eligible, config.formation, config.managerCount, random, !!config.subs);
     if (result.error) return result;
     const pool = result.assigned.map((index, slot) => {
       const entry = eligible[index];
@@ -81,7 +82,8 @@
     const manager = game.managers.find(manager => manager.id === managerId);
     if (!manager) return { error: 'Choose the winning manager.' };
     if (!Number.isInteger(price) || price < 0) return { error: 'Enter a whole-million price, including £0 for a free transfer.' };
-    if (purchases(game, managerId).length >= 11) return { error: `${manager.name} already has 11 players.` };
+    const size = draft.squadSize(game.config);
+    if (purchases(game, managerId).length >= size) return { error: `${manager.name} already has ${size} players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
     return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
@@ -128,7 +130,7 @@
         if (!season || !candidates([{ ...player, clubSeasons: [season] }], config).length) throw Error('Invalid saved pool');
         return { id: player.id, player, season, allocatedPosition: record.allocatedPosition };
       });
-      if (pool.length !== config.managerCount * 11 || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
+      if ((config.subs !== undefined && typeof config.subs !== 'boolean') || pool.length !== config.managerCount * draft.squadSize(config) || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
       let game = createGame(config, pool);
       // Replay sales through normal validation to rebuild budgets and ownership.
       for (const sale of saved.sales) {
