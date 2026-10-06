@@ -30,7 +30,7 @@
       players.push({ side, index, slot, role: slot.position, keeper: slot.position === 'GK', name: info.name || '', id: info.id, x: 0, y: 0, vx: 0, vy: 0, top: 6.4 + clamp((info.rating || 70) - 60, -10, 35) * .045, wx: 0, wy: 0, task: null });
     });
     const ball = { x: LENGTH / 2, y: WIDTH / 2, z: 0, owner: null, flight: null }, frames = [], events = [], steps = [];
-    let possession = plan.side, t = 0, climax = null, next = 0, waitUntil = 0, ended = false;
+    let possession = plan.side, t = 0, climax = null, next = 0, waitUntil = 0, ended = false, deadBall = false;
     const teamOf = side => players.filter(p => p.side === side);
     const outfield = side => teamOf(side).filter(p => !p.keeper);
     const goalX = side => dirs[side] === 1 ? LENGTH : 0;
@@ -58,7 +58,7 @@
     // The nearest defender presses the ball; the next one covers the space behind.
     function defend() {
       for (const p of players) if (p.task?.auto) p.task = null;
-      if (!possession || ball.flight?.kind === 'shot') return;
+      if (!possession || deadBall || ball.flight?.kind === 'shot') return;
       const side = other(possession), target = ball.flight ? ball.flight.to : ball, goal = { x: ownGoalX(side), y: WIDTH / 2 };
       const free = outfield(side).filter(p => !p.task).sort((a, b) => gap(a, target) - gap(b, target));
       const towardGoal = distance => { const length = gap(goal, target) || 1; return { x: target.x + (goal.x - target.x) / length * distance, y: target.y + (goal.y - target.y) / length * distance }; };
@@ -163,9 +163,10 @@
       return [
         release(),
         () => { possession = side; keeper.task = { point: spot }; return 1; },
-        () => { ball.x = spot.x; ball.y = spot.y; ball.z = 0; say('Goal kick', { side }); return 0; },
+        () => { ball.x = spot.x; ball.y = spot.y; ball.z = 0; deadBall = true; say('Goal kick', { side }); return 0; },
         waitFor(() => gap(keeper, spot) < 1, 4),
         () => { ball.owner = keeper; return 1.2; },
+        () => { deadBall = false; return 0; },
         pass(o => chooseReceiver(side, o, { min: 25, max: 60 }), 'long'), () => 1.2,
       ];
     }
@@ -184,12 +185,12 @@
           attackers.forEach(attacker => { const marker = nearest(markers.filter(p => !used.has(p)), attacker); if (marker) { used.add(marker); marker.task = { point: () => ({ x: attacker.x + dir, y: attacker.y }) }; } });
           return .8;
         },
-        () => { ball.x = flag.x; ball.y = flag.y; ball.z = 0; return 0; },
+        () => { ball.x = flag.x; ball.y = flag.y; ball.z = 0; deadBall = true; return 0; },
         waitFor(() => gap(taker, flag) < 1.3, 5),
         () => { ball.owner = taker; return 1.4; },
         () => {
           const header = target || attackers[Math.floor(random() * attackers.length)], landing = { x: gx - dir * (6 + random() * 4), y: WIDTH / 2 + (random() - .5) * 10 };
-          say(`${surname(taker.name)} swings it in`, { side });
+          say(`${surname(taker.name)} swings it in`, { side }); deadBall = false;
           if (finish === 'goal') { kick(landing, 19, 5.5, 'cross', header); insert(shoot(header, 'goal', { header: true })); }
           else if (finish === 'claim') { const keeper = keeperOf(defending); kick(landing, 19, 5.5, 'cross', keeper, () => say(`${surname(keeper.name)} claims it`, { side: defending })); insert(hold(1.2), pass(o => chooseReceiver(defending, o, { min: 15, max: 45 }), 'long'), () => 1, release()); }
           else {
@@ -201,25 +202,26 @@
         },
       ];
     }
-    function shoot(shooter, outcome, { header = false } = {}) {
+    function shoot(shooter, outcome, { header = false, speed: strike = null, height = null } = {}) {
       return () => {
         const side = shooter.side, gx = goalX(side), dir = dirs[side], defending = other(side), keeper = keeperOf(defending);
         if (ball.owner !== shooter) ball.owner = shooter;
         if (outcome !== 'goal') climax ??= t;
-        const speed = header ? 16 : 26, sign = random() < .5 ? -1 : 1;
+        deadBall = false;
+        const speed = strike ?? (header ? 16 : 26), sign = random() < .5 ? -1 : 1;
         if (outcome === 'goal') {
           const to = { x: gx + dir * 1.6, y: WIDTH / 2 + sign * (POST - .5 - random() * 1.4) };
           keeper.task = { point: { x: gx - dir * .8, y: WIDTH / 2 - sign * 1.6 }, sprint: true };
-          kick(to, speed, header ? 1.4 : .9, 'shot', null, () => { climax = t; say(`GOAL! ${shooter.name}`, { side, goal: true, assist: plan.assistName || null }); insert(...celebrate(shooter)); });
+          kick(to, speed, height ?? (header ? 1.4 : .9), 'shot', null, () => { climax = t; say(`GOAL! ${shooter.name}`, { side, goal: true, assist: plan.assistName || null }); insert(...celebrate(shooter)); });
         } else if (outcome === 'saved') {
           const to = { x: gx - dir * 1.3, y: WIDTH / 2 + (random() - .5) * 4.5 };
           say(`${surname(shooter.name)} shoots`, { side });
-          kick(to, speed, .8, 'shot', keeper, () => say(`Saved by ${surname(keeper.name)}`, { side: defending }));
+          kick(to, speed, height ?? .8, 'shot', keeper, () => say(`Saved by ${surname(keeper.name)}`, { side: defending }));
           insert(hold(1.4), pass(o => chooseReceiver(defending, o, { forward: false, min: 10, max: 35 })), () => 1.2, release());
         } else if (outcome === 'wide') {
           const to = { x: gx + dir * 2.5, y: WIDTH / 2 + sign * (POST + 1 + random() * 5) };
           say(`${surname(shooter.name)} shoots`, { side });
-          kick(to, speed, 1.6, 'shot', null, () => { say(`${surname(shooter.name)} fires wide`, { side }); insert(...goalKick(defending)); });
+          kick(to, speed, height ?? 1.6, 'shot', null, () => { say(`${surname(shooter.name)} fires wide`, { side }); insert(...goalKick(defending)); });
         } else {
           const to = { x: gx + dir, y: WIDTH / 2 + sign * (POST + 2 + random() * 6) };
           const blocker = nearest(outfield(defending), { x: (shooter.x + gx) / 2, y: (shooter.y + WIDTH / 2) / 2 });
@@ -234,6 +236,41 @@
         return 0;
       };
     }
+    function setPiece(side, kind, taker, victim, outcome) {
+      const gx = goalX(side), dir = dirs[side], defending = other(side), keeper = keeperOf(defending);
+      const spot = kind === 'penalty' ? { x: gx - dir * 11, y: WIDTH / 2 } : { x: gx - dir * (20 + random() * 8), y: WIDTH / 2 + (random() - .5) * 24 };
+      const foul = kind === 'penalty' ? { x: gx - dir * (8 + random() * 6), y: WIDTH / 2 + (random() - .5) * 18 } : spot;
+      const toGoal = { x: gx - spot.x, y: WIDTH / 2 - spot.y }, length = Math.sqrt(toGoal.x * toGoal.x + toGoal.y * toGoal.y) || 1, ux = toGoal.x / length, uy = toGoal.y / length;
+      return [
+        carry(1.8, () => foul),
+        () => { const fouler = nearest(outfield(defending), ball); fouler.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true }; return .8; },
+        () => {
+          say(`Foul on ${surname(victim.name)}`, { side });
+          say(kind === 'penalty' ? 'Penalty!' : 'Free kick in a dangerous position', { side, setPiece: kind });
+          ball.owner = null; possession = side; deadBall = true;
+          for (const p of players) p.task = null;
+          ball.x = spot.x; ball.y = spot.y; ball.z = 0;
+          taker.task = { point: { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 } };
+          keeper.task = { point: kind === 'penalty' ? { x: gx, y: WIDTH / 2 } : { x: gx - dir * .8, y: WIDTH / 2 + (spot.y < WIDTH / 2 ? 1.6 : -1.6) } };
+          if (kind === 'penalty') {
+            // Everyone else waits outside the box, level with or behind the spot.
+            players.filter(p => p !== taker && !p.keeper).forEach((p, index) => { p.task = { point: { x: gx - dir * (18 + (index % 3) * 2.2), y: WIDTH / 2 + (index - 9) * 2.6 } }; });
+          } else {
+            const wall = outfield(defending).sort((a, b) => gap(a, spot) - gap(b, spot)).slice(0, 4);
+            wall.forEach((p, index) => { p.task = { point: { x: spot.x + ux * 9.15 - uy * (index - 1.5) * .8, y: spot.y + uy * 9.15 + ux * (index - 1.5) * .8 } }; });
+            const runners = outfield(side).filter(p => p !== taker).sort((a, b) => depth(side, b) - depth(side, a)).slice(0, 4);
+            runners.forEach((p, index) => { p.task = { point: { x: gx - dir * (7 + (index % 2) * 4), y: WIDTH / 2 + (index - 1.5) * 4 } }; });
+            const markers = outfield(defending).filter(p => !wall.includes(p));
+            runners.forEach(runner => { const marker = nearest(markers.filter(p => !p.task), runner); if (marker) marker.task = { point: () => ({ x: runner.x + dir, y: runner.y }) }; });
+          }
+          return 2.8;
+        },
+        () => { taker.task = { point: { x: spot.x, y: spot.y } }; return .6; },
+        () => { ball.owner = taker; ball.x = spot.x; ball.y = spot.y; return .5; },
+        shoot(taker, outcome, kind === 'penalty' ? { speed: 24, height: .6 } : { speed: 22, height: 3.4 }),
+        () => 1, release(),
+      ];
+    }
     function start(side, fromOwnGoal) {
       ball.x = dirs[side] === 1 ? fromOwnGoal : LENGTH - fromOwnGoal; ball.y = 10 + random() * 48; possession = side;
       for (const p of players) { const point = shape(p); p.x = point.x; p.y = point.y; }
@@ -243,6 +280,12 @@
     function attack(side, finisher, assister, outcome) {
       const n = 1 + Math.floor(random() * 3), gx = goalX(side), dir = dirs[side];
       const style = plan.style || (assister ? (WIDE.has(assister.role) || random() < .35 ? 'cross' : 'through') : 'solo');
+      if (style === 'penalty' || style === 'freekick') {
+        const victim = style === 'penalty' ? finisher : outfield(side).filter(p => p !== finisher).sort((a, b) => (ATTACKING[b.role] || 0) - (ATTACKING[a.role] || 0))[0] || finisher;
+        start(side, 40 + random() * 15);
+        insert(...buildUp(side, 1 + Math.floor(random() * 2), victim), ...setPiece(side, style, finisher, victim, outcome));
+        return;
+      }
       if (style === 'corner') {
         // A shot deflected behind, then the real assister's corner and the real scorer's header.
         const shooter = outfield(side).find(p => p !== finisher && p !== assister) || finisher;
@@ -310,13 +353,22 @@
     const teams = { home: { squad: home.squad, slots: slotsOf(home) }, away: { squad: away.squad, slots: slotsOf(away) } };
     const goals = [...result.homeScorers.map(goal => ({ ...goal, side: 'home' })), ...result.awayScorers.map(goal => ({ ...goal, side: 'away' }))].map(goal => ({ ...goal, abs: leagueCore.absoluteMinute(goal) }));
     const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }];
-    goals.forEach(goal => plans.push({ kind: 'goal', side: goal.side, abs: goal.abs, scorerId: goal.playerId, assistId: goal.assistId, assistName: goal.assistName, priority: 2, style: goal.assistId && random() < .15 ? 'corner' : null }));
+    let penalties = 0;
+    goals.forEach(goal => {
+      const roll = random();
+      let style = goal.assistId ? (roll < .15 ? 'corner' : null) : roll < .25 && penalties < 2 ? 'penalty' : roll < .36 ? 'freekick' : null;
+      if (style === 'penalty') penalties++;
+      plans.push({ kind: 'goal', side: goal.side, abs: goal.abs, scorerId: goal.playerId, assistId: goal.assistId, assistName: goal.assistName, priority: 2, style });
+    });
     const homeXg = result.homeXg || 1.4, awayXg = result.awayXg || 1.2;
     function chance(side, priority) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const abs = 4 + random() * 90;
         if (Math.abs(abs - SECOND) < 2.5 || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
-        const roll = random(), plan = { kind: 'chance', side, abs, outcome: roll < .4 ? 'saved' : roll < .72 ? 'wide' : 'blocked', priority: priority - attempt * .001 };
+        const roll = random(), set = random(), style = set < .015 && penalties === 0 ? 'penalty' : set < .11 ? 'freekick' : null;
+        if (style === 'penalty') penalties++;
+        const outcome = style ? (roll < .55 ? 'saved' : 'wide') : roll < .4 ? 'saved' : roll < .72 ? 'wide' : 'blocked';
+        const plan = { kind: 'chance', side, abs, outcome, style, priority: priority - attempt * .001 };
         plans.push(plan); return plan;
       }
       return null;
@@ -383,6 +435,10 @@
     const s = clamp((r - piece.r0) / Math.max(.001, piece.r1 - piece.r0), 0, 1), smooth = s * s * (3 - 2 * s), start = from || to, end = to || from;
     return { frame: start.map((value, index) => index === 3 ? -1 : value + (end[index] - value) * smooth), fast: piece.r1 - piece.r0 > .4 && r < piece.r1 };
   }
+  function intensity(timeline, r) {
+    const { frame, fast } = stateAt(timeline, r), toGoal = Math.min(frame[0], LENGTH - frame[0]);
+    return fast ? .15 : clamp(1.15 - toGoal / 40, .2, 1);
+  }
   function draw(canvas, timeline, r, colours) {
     const context = canvas.getContext('2d'), scale = canvas.width / (LENGTH + 2 * MARGIN), px = value => (value + MARGIN) * scale;
     const { frame, fast } = stateAt(timeline, r), clock = clockAt(timeline, r);
@@ -436,6 +492,6 @@
       context.fillText(goal.text.replace('GOAL! ', '') + (goal.assist ? ` · assist ${goal.assist}` : ''), canvas.width / 2, canvas.height * .58);
     }
   }
-  const api = { build, simulate, clockAt, stateAt, draw, ASPECT: (WIDTH + 2 * MARGIN) / (LENGTH + 2 * MARGIN), END };
+  const api = { build, simulate, clockAt, stateAt, intensity, draw, ASPECT: (WIDTH + 2 * MARGIN) / (LENGTH + 2 * MARGIN), END };
   if (typeof module !== 'undefined') module.exports = api; else scope.MatchView = api;
 })(globalThis);

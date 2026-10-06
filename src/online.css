@@ -98,3 +98,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .check input[type=checkbox]{min-height:0;width:20px;height:20px;padding:0}
 @media(max-width:799px){.lobby-rules{margin-top:14px}}
 .formation-pick{width:auto!important;min-height:38px!important;padding:6px 10px!important;font-weight:700}
+.resume-card{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:20px;border-color:#47633c}
+.resume-card h2{margin:6px 0 0}
+.resume-card p{margin:4px 0 0}
+.resume-card .actions{flex:0 1 360px}

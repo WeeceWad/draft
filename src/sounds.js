@@ -23,13 +23,50 @@
     oscillator.connect(gain).connect(output.destination);
     oscillator.start(at); oscillator.stop(at + duration + .05);
   }
+  // Crowd: filtered noise that murmurs, swells as attacks build, and roars for goals.
+  let crowd = null;
+  function noise(output, seconds) {
+    const buffer = output.createBuffer(1, output.sampleRate * seconds, output.sampleRate), data = buffer.getChannelData(0);
+    let brown = 0;
+    for (let index = 0; index < data.length; index++) { brown = (brown + .02 * (Math.random() * 2 - 1)) / 1.02; data[index] = brown * 3.5; }
+    return buffer;
+  }
+  function crowdLevel(level) {
+    const output = enabled && context && audio();
+    if (!output) return;
+    if (!crowd) {
+      const source = output.createBufferSource(), filter = output.createBiquadFilter(), gain = output.createGain();
+      source.buffer = noise(output, 3); source.loop = true;
+      filter.type = 'lowpass'; filter.frequency.value = 900; gain.gain.value = 0;
+      source.connect(filter).connect(gain).connect(output.destination); source.start();
+      crowd = { source, gain, filter, level: -1 };
+    }
+    if (Math.abs(level - crowd.level) < .03) return;
+    crowd.level = level;
+    crowd.gain.gain.setTargetAtTime(.04 + level * .2, output.currentTime, .6);
+    crowd.filter.frequency.setTargetAtTime(700 + level * 900, output.currentTime, .6);
+  }
+  function crowdStop() {
+    if (!crowd) return;
+    const ending = crowd; crowd = null;
+    try { ending.gain.gain.setTargetAtTime(0, context.currentTime, .4); ending.source.stop(context.currentTime + 2); } catch {}
+  }
+  function roar() {
+    const output = enabled && context && audio();
+    if (!output) return;
+    const source = output.createBufferSource(), filter = output.createBiquadFilter(), gain = output.createGain(), at = output.currentTime;
+    source.buffer = noise(output, 4); filter.type = 'bandpass'; filter.frequency.setValueAtTime(600, at); filter.frequency.linearRampToValueAtTime(1300, at + .6); filter.Q.value = .6;
+    gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(1.1, at + .35); gain.gain.exponentialRampToValueAtTime(.0001, at + 3.8);
+    source.connect(filter).connect(gain).connect(output.destination); source.start(at); source.stop(at + 4);
+  }
   const api = {
+    crowd: crowdLevel, crowdStop, roar,
     get enabled() { return enabled; },
     unlock() { if (enabled) audio(); },
     toggle() {
       enabled = !enabled;
       try { localStorage.setItem(key, enabled ? 'on' : 'off'); } catch {}
-      if (enabled) { audio(); tone(880, 0, .12, { type: 'triangle' }); }
+      if (enabled) { audio(); tone(880, 0, .12, { type: 'triangle' }); } else crowdStop();
       return enabled;
     },
     // Wheel clicks that slow down like a decelerating spinner, then a reveal chime.

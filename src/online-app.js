@@ -8,7 +8,7 @@
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
   let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
@@ -41,7 +41,8 @@
     const newRound = room?.round?.id !== next.round?.id;
     const first = room?.id !== next.id;
     const leaderMoved = newRound || previous?.round?.leader?.price !== next.round?.leader?.price;
-    room = next; storage.set('room', room.id);
+    room = next; storage.set('room', room.id); resumable = null;
+    try { sessionStorage.setItem('touchline-online-tab-room', room.id); } catch {}
     if (newRound) revealDrawn = null;
     // Keep the bid box one million above the highest bid, unless a higher bid is already typed.
     showRatings = next.showRatings !== false;
@@ -95,12 +96,12 @@
   function rules(config) { return `<div class="rules stack">${config.devMode ? '<p class="pill green">Dev mode · the auction is skipped and XIs are picked automatically</p>' : ''}<div class="row"><span>Seasons</span><strong>${esc(config.seasonFrom)} – ${esc(config.seasonTo)}</strong></div><div class="row"><span>${config.mode === 'peak' ? 'Peak overall' : 'Season'} rating</span><strong>${config.ratingMin} – ${config.ratingMax}</strong></div><div class="row"><span>Formation</span><strong>${config.formation === DraftCore.FREE ? 'Free · each manager picks' : esc(config.formation)}</strong></div><p>£1bn each · 11 players each · bids from £1m in whole millions · 60 seconds from the first bid · +10 seconds per new bid · the highest bidder is locked in. The host can change these in the lobby. They lock when the auction starts.</p></div>`; }
   function home() {
     const code = new URLSearchParams(location.search).get('code') || '';
-    return `<div class="hero"><div class="eyebrow">A room. A budget. Your best XI.</div><h1 class="gap-top">Build your team.<br>Beat your mates.</h1><p>A live football auction, straight from your phone. Draft legends, outbid your friends, then play a league together.</p></div><div class="grid home-panels"><section class="panel stack"><div class="eyebrow">You set the rules</div><h2>Host an auction</h2><p>Choose your player pool, share a four-digit code and get everyone ready.</p><button class="primary" data-do="setup">Create room →</button></section><form id="join-form" class="panel stack"><div class="eyebrow">Got an invite?</div><h2>Join your friends</h2><div class="field"><label for="join-name">Your manager name</label><input id="join-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="join-code">Room code</label><input class="code-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required value="${esc(/^\d{4}$/.test(code) ? code : '')}" placeholder="0000" autocomplete="off"></div><button class="primary" ${disabled(busy)}>Join room →</button></form><p class="wide hint">Each manager needs their own browser or device. Already playing? Use the same browser to rejoin with your saved team. <a href="/offline.html">Play the local version</a>.</p></div>`;
+    return `<div class="hero"><div class="eyebrow">A room. A budget. Your best XI.</div><h1 class="gap-top">Build your team.<br>Beat your mates.</h1><p>A live football auction, straight from your phone. Draft legends, outbid your friends, then play a league together.</p></div>${resumable ? `<section class="panel resume-card"><div><div class="eyebrow">Continue where you left off</div><h2>Room ${esc(resumable.code)}</h2><p>${esc(resumable.label)}</p></div><div class="actions"><button class="primary" data-do="resume" ${disabled(busy)}>Rejoin room →</button><button class="quiet" data-do="forget">Forget it</button></div></section>` : ''}<div class="grid home-panels"><section class="panel stack"><div class="eyebrow">You set the rules</div><h2>Host an auction</h2><p>Choose your player pool, share a four-digit code and get everyone ready.</p><button class="primary" data-do="setup">Create room →</button></section><form id="join-form" class="panel stack"><div class="eyebrow">Got an invite?</div><h2>Join your friends</h2><div class="field"><label for="join-name">Your manager name</label><input id="join-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div><div class="field"><label for="join-code">Room code</label><input class="code-input" id="join-code" name="code" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required value="${esc(/^\d{4}$/.test(code) ? code : '')}" placeholder="0000" autocomplete="off"></div><button class="primary" ${disabled(busy)}>Join room →</button></form><p class="wide hint">Each manager needs their own browser or device. Already playing? Use the same browser to rejoin with your saved team. <a href="/offline.html">Play the local version</a>.</p></div>`;
   }
   // The same rule controls create a room and, for the host, edit it in the lobby.
   function ruleFields(values, minimum = 2) {
     const from = Math.max(0, seasons.indexOf(values.seasonFrom)), to = Math.max(0, seasons.indexOf(values.seasonTo));
-    return `<div class="grid"><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => i + 2).map(count => `<option value="${count}" ${count === values.capacity ? 'selected' : ''} ${count < minimum ? 'disabled' : ''}>${count} managers · ${count * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${[DraftCore.FREE, ...Object.keys(DraftCore.formations)].map(value => `<option value="${esc(value)}" ${value === values.formation ? 'selected' : ''}>${value === DraftCore.FREE ? 'Free · each manager picks their own' : esc(value)}</option>`).join('')}</select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak" ${values.mode === 'peak' ? 'selected' : ''}>Peak overall rating</option><option value="season" ${values.mode === 'season' ? 'selected' : ''}>Rating in the selected season</option></select></div></div><div class="slider-grid"><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[from])} – ${esc(seasons[to])}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="${from}"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${to}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">${values.ratingMin} – ${values.ratingMax}</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="${values.ratingMin}"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="${values.ratingMax}"></label></div></div></div><label class="check"><input type="checkbox" name="devMode" ${values.devMode ? 'checked' : ''}><span><strong>Dev mode</strong> · skip the auction. Every manager gets a full XI in the right positions, so you can go straight to the league.</span></label>`;
+    return `<div class="grid"><div class="field"><label for="capacity">Number of managers</label><select id="capacity" name="capacity">${Array.from({ length: 7 }, (_, i) => i + 2).map(count => `<option value="${count}" ${count === values.capacity ? 'selected' : ''} ${count < minimum ? 'disabled' : ''}>${count} managers · ${count * 11} players</option>`).join('')}</select></div><div class="field"><label for="formation">Starting formation</label><select id="formation" name="formation">${[DraftCore.FREE, ...Object.keys(DraftCore.formations)].map(value => `<option value="${esc(value)}" ${value === values.formation ? 'selected' : ''}>${value === DraftCore.FREE ? 'Free (each manager picks)' : esc(value)}</option>`).join('')}</select></div><div class="field"><label for="mode">Rating type</label><select id="mode" name="mode"><option value="peak" ${values.mode === 'peak' ? 'selected' : ''}>Peak overall rating</option><option value="season" ${values.mode === 'season' ? 'selected' : ''}>Rating in the selected season</option></select></div></div><div class="slider-grid"><div class="sliders"><div class="row"><span class="label">Season range</span><strong id="season-label">${esc(seasons[from])} – ${esc(seasons[to])}</strong></div><div class="range-pair"><label>From<input id="season-from" type="range" name="seasonFrom" min="0" max="${seasons.length - 1}" value="${from}"></label><label>To<input id="season-to" type="range" name="seasonTo" min="0" max="${seasons.length - 1}" value="${to}"></label></div></div><div class="sliders"><div class="row"><span class="label">Rating range</span><strong id="rating-label">${values.ratingMin} – ${values.ratingMax}</strong></div><div class="range-pair"><label>Minimum<input id="rating-min" type="range" name="ratingMin" min="40" max="95" value="${values.ratingMin}"></label><label>Maximum<input id="rating-max" type="range" name="ratingMax" min="40" max="95" value="${values.ratingMax}"></label></div></div></div><label class="check"><input type="checkbox" name="devMode" ${values.devMode ? 'checked' : ''}><span><strong>Dev mode</strong> · skip the auction. Every manager gets a full XI in the right positions, so you can go straight to the league.</span></label>`;
   }
   const readRules = form => { const data = new FormData(form); return { capacity: +data.get('capacity'), formation: data.get('formation'), mode: data.get('mode'), seasonFrom: seasons[+data.get('seasonFrom')], seasonTo: seasons[+data.get('seasonTo')], ratingMin: +data.get('ratingMin'), ratingMax: +data.get('ratingMax'), devMode: data.get('devMode') === 'on' }; };
   const ruleKeys = ['capacity', 'formation', 'mode', 'seasonFrom', 'seasonTo', 'ratingMin', 'ratingMax', 'devMode'];
@@ -204,12 +205,13 @@
   function animate() {
     frame = null;
     const live = liveNow();
-    if (!live || live.view !== 'pitch') return;
+    if (!live || live.view !== 'pitch') { sound.crowdStop(); return; }
     const canvas = document.getElementById('match-canvas');
     if (canvas && canvas.clientWidth) {
       const width = Math.round(canvas.clientWidth * (window.devicePixelRatio || 1));
       if (canvas.width !== width) { canvas.width = width; canvas.height = Math.round(width * MatchView.ASPECT); }
       MatchView.draw(canvas, timelineFor(live, watchedFixture(live)), realSeconds(live), pitchColours);
+      sound.crowd(MatchView.intensity(timelineFor(live, watchedFixture(live)), realSeconds(live)));
     }
     frame = requestAnimationFrame(animate);
   }
@@ -288,7 +290,7 @@
     if (live.view === 'pitch') { const watched = watchedFixture(live), now = fixtureClock(live, watched); minute = `${Math.floor(now)}:${timelineFor(live, watched).events.filter(event => event.abs <= now).length}:${watched.id}`; }
     if (minute === shownMinute) return;
     shownMinute = minute;
-    const goals = goalsNow(live); if (goals > liveGoals) sound.goal(); liveGoals = goals;
+    const goals = goalsNow(live); if (goals > liveGoals) { if (live.view === 'pitch') sound.roar(); else sound.goal(); } liveGoals = goals;
     const head = document.getElementById('live-head'), rest = document.getElementById('live-rest');
     if (head && rest) { head.innerHTML = liveHead(live); rest.innerHTML = liveRest(live); }
     if (live.view === 'pitch' && !frame) frame = requestAnimationFrame(animate);
@@ -364,6 +366,8 @@
       return;
     }
     if (type === 'leave') { leaveRoom(); render(); return; }
+    if (type === 'resume' && resumable) { const id = resumable.id; busy = true; render(); try { await api(`/api/room/${id}`); connect(); } catch (error) { toast(error.message); storage.set('room', null); resumable = null; } finally { busy = false; render(); } return; }
+    if (type === 'forget') { storage.set('room', null); resumable = null; render(); return; }
     if (type === 'discard-rules') { rulesDraft = null; render(); return; }
     if (type === 'watch') { watchFixture = id; shownMinute = -1; updateLive(); return; }
     if (type === 'matchView') return action('matchView', { view: id });
@@ -432,8 +436,20 @@
   }
   function leaveRoom() {
     clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); }
-    socket = null; room = null; connected = false; storage.set('room', null); rulesDraft = null; screen = 'home'; tab = 'auction'; liveKey = null; summaryPending = false;
+    socket = null; room = null; connected = false; storage.set('room', null); rulesDraft = null; resumable = null;
+    try { sessionStorage.removeItem('touchline-online-tab-room'); } catch {} screen = 'home'; tab = 'auction'; liveKey = null; summaryPending = false;
     history.replaceState(null, '', '/');
+  }
+  // Look at a saved room without entering it, so the home screen can offer to rejoin.
+  async function peek(id, code) {
+    try {
+      const response = await fetch(`/api/room/${id}`, { credentials: 'same-origin' });
+      if ([403, 404].includes(response.status)) { storage.set('room', null); return; }
+      const saved = (await response.json()).room;
+      if (!saved) return;
+      const stage = saved.status === 'lobby' ? 'Lobby' : saved.finished ? 'Season finished' : saved.league ? `League · matchday ${saved.league.round}` : saved.status === 'complete' ? 'Auction finished' : 'Auction in progress';
+      resumable = { id, code: saved.code, label: `${stage} · ${saved.members.length}/${saved.capacity} managers` };
+    } catch {}
   }
   async function init() {
     try {
@@ -441,10 +457,13 @@
       const code = new URLSearchParams(location.search).get('code'), name = storage.get('name');
       const results = await Promise.all([api('/api/session', {}), api('/api/options')]); seasons = results[1].seasons;
       const id = storage.get('room');
-      if (id) { try { await api(`/api/room/${id}`); } catch (error) { if ([403, 404].includes(error.status)) storage.set('room', null); toast(error.message); } }
+      let tabRoom = null; try { tabRoom = sessionStorage.getItem('touchline-online-tab-room'); } catch {}
+      if (id && tabRoom === id) { try { await api(`/api/room/${id}`); } catch (error) { if ([403, 404].includes(error.status)) storage.set('room', null); toast(error.message); } }
+      else if (id) await peek(id, code);
+      if (resumable && resumable.code === code) history.replaceState(null, '', '/');
       if (room?.finished && room.next && !code) { await followNext(); return; }
       // An invite link for a different room replaces the saved one, joining its lobby when we know the name.
-      if (/^\d{4}$/.test(code || '') && room?.code !== code) {
+      if (/^\d{4}$/.test(code || '') && room?.code !== code && resumable?.code !== code) {
         if (room) { leaveRoom(); history.replaceState(null, '', `/?code=${code}`); }
         if (name) { try { await api('/api/join', { name, code }); } catch (error) { toast(error.message); } }
       }

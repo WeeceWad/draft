@@ -45,6 +45,11 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     await host.locator('[data-do=withdraw]').click();
     await guest.waitForFunction(() => document.querySelector('.player-card')?.textContent.includes('Blair signed them for'));
     assert.equal(await guest.locator('.budget').innerText(), '£990m');
+    // A fresh visit offers to rejoin instead of jumping into the saved room; a refresh stays in it.
+    const fresh = await guest.context().newPage(); await fresh.goto(base); await fresh.locator('.resume-card').waitFor();
+    assert.equal(await fresh.locator('nav.tabs').count(), 0, 'A new visit lands on the home screen');
+    assert.match(await fresh.locator('.resume-card').innerText(), new RegExp(code));
+    await fresh.locator('[data-do=resume]').click(); await fresh.locator('nav.tabs').waitFor(); await fresh.close();
     await guest.reload(); await guest.locator('nav [data-do=tab][data-id=teams]').click();
     assert.equal(await guest.locator('.squad-player').count(), 1); assert.equal(await guest.locator('.squad-group').count(), 1);
     await guest.locator('.slot').first().click(); await guest.locator('.pick-prompt').waitFor(); await guest.locator('.squad-player').click();
