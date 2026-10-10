@@ -95,7 +95,7 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   subs = command(subs, 'a', 'settings', { capacity: 3, config: { ...config, subs: true } });
   subs.members.forEach(member => { subs = command(subs, member.uid, 'ready', { ready: true }); });
   subs = command(subs, 'a', 'start');
-  assert.equal(subs.game.pool.length, 48); assert.equal(subs.game.pool.filter(entry => entry.player.positions.includes('GK')).length, 6);
+  assert.equal(subs.game.pool.length, 48); assert.equal(subs.game.pool.filter(entry => entry.player.positions.includes('GK')).length, 3, 'Benches are outfield players: one keeper per squad');
   while (subs.status !== 'complete') {
     subs = command(subs, 'a', 'reveal'); time += 2000;
     const active = engine.view(subs, 'a').round.active, winner = subs.members.find(member => active.includes(member.managerId));
@@ -105,7 +105,7 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   for (const manager of subs.game.managers) {
     const owned = auction.purchases(subs.game, manager.id);
     assert.equal(owned.length, 16, 'Substitutes squads have 16 players');
-    assert.equal(owned.filter(sale => subs.game.pool.find(entry => entry.id === sale.playerId).player.positions.includes('GK')).length, 2, 'Every squad ends with two keepers');
+    assert.equal(owned.filter(sale => subs.game.pool.find(entry => entry.id === sale.playerId).player.positions.includes('GK')).length, 1, 'Every squad ends with one keeper');
   }
   subs.members.forEach(member => { subs = command(subs, member.uid, 'autoPlace'); });
   subs = command(subs, 'a', 'startLeague');
@@ -124,7 +124,14 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   const outfield = homeTeam.squad.filter(player => player.position !== 'GK');
   for (let index = 0; index < 5; index++) subs = command(subs, homeUid, 'substitute', { off: outfield[index].id, on: homeTeam.bench[index].id });
   assert.throws(() => command(subs, homeUid, 'substitute', { off: outfield[5].id, on: homeTeam.bench[0].id }), /all five/);
-  subs = command(subs, homeUid, 'undoSub'); subs = command(subs, homeUid, 'readyHalf', { ready: true });
+  subs = command(subs, homeUid, 'undoSub');
+  const [left, right] = league.lineupAfter(homeTeam, subs.league.pending.changes[fixture.id].home).filter(player => player.position !== 'GK');
+  assert.throws(() => command(subs, homeUid, 'swapHalf', { swap: [left.id, left.id] }), /two players/);
+  subs = command(subs, homeUid, 'swapHalf', { swap: [left.id, right.id] });
+  const swapped = league.lineupAfter(homeTeam, subs.league.pending.changes[fixture.id].home);
+  assert.equal(swapped.find(player => player.id === left.id).position, right.position, 'Half-time swaps move players between positions');
+  assert.equal(swapped.find(player => player.id === left.id).stamina, left.stamina, 'Moved players keep their stamina');
+  subs = command(subs, homeUid, 'readyHalf', { ready: true });
   assert.equal(subs.league.pending.ready[fixture.homeId], true);
   const saved = engine.unpack(engine.pack(subs));
   assert.deepEqual(saved.league.pending.changes, subs.league.pending.changes, 'Half-time changes survive a restart');
@@ -133,7 +140,7 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   subs = command(subs, 'a', 'secondHalf');
   assert.equal(subs.league.round, 1); assert.equal(subs.league.pending, null); assert.deepEqual([subs.live.from, subs.live.to, subs.live.half], [48, 97, 2]);
   const result = subs.league.fixtures.find(item => item.id === fixture.id).result;
-  assert.equal(result.subs.home.length, 4); assert.deepEqual(result.halfTime, { home: firstHalf.homeGoals, away: firstHalf.awayGoals });
+  assert.equal(result.subs.home.filter(change => change.on).length, 4); assert.equal(result.subs.home.filter(change => change.swap).length, 1); assert.deepEqual(result.halfTime, { home: firstHalf.homeGoals, away: firstHalf.awayGoals });
   const pitch = new Set(league.lineupAfter(homeTeam, result.subs.home).map(player => player.id));
   assert(result.homeScorers.filter(goal => league.absoluteMinute(goal) > 48).every(goal => pitch.has(goal.playerId)), 'Second-half scorers were on the pitch');
   assert(league.secondHalfTeam(homeTeam, []).overall <= homeTeam.overall, 'Tired starters are weaker after the break');

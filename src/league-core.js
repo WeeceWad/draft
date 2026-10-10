@@ -64,28 +64,44 @@
   }
   // Substitutes mode (Touchline's own rules; 38-0 has no substitutions). Starters tire in the
   // second half by position; players coming off the bench are fresh.
-  const FATIGUE = { GK: .01, CB: .04, LB: .07, RB: .07, LWB: .08, RWB: .08, CDM: .05, CM: .06, CAM: .06, LM: .07, RM: .07, LW: .07, RW: .07, ST: .06 };
+  // Stamina at half-time: how much a role drains in a first half (wide players and full-backs run most),
+  // plus a fixed per-player constitution of -4 to +4. Each missing stamina point costs 0.3% of rating.
+  const DRAIN = { GK: 3, CB: 12, LB: 20, RB: 20, LWB: 22, RWB: 22, CDM: 16, CM: 17, CAM: 15, LM: 20, RM: 20, LW: 20, RW: 20, ST: 14 };
+  const STAMINA_COST = .003;
+  const FATIGUE = Object.fromEntries(Object.entries(DRAIN).map(([position, drain]) => [position, drain * STAMINA_COST]));
+  const constitution = id => { let value = 0; for (const char of String(id)) value = (Math.imul(value, 31) + char.charCodeAt(0)) >>> 0; return value % 9 - 4; };
+  const staminaAt = (id, position) => clamp(100 - (DRAIN[position] ?? 15) + constitution(id), 60, 100);
+  const secondHalfRating = player => player.rating * (1 - (100 - player.stamina) * STAMINA_COST);
+  // The second-half XI after half-time changes: substitutions ({ off, on }) and position swaps ({ swap: [a, b] }).
+  // Swapped players keep the stamina they had; substitutes come on fresh.
   function lineupAfter(snapshot, changes = []) {
-    const players = snapshot.squad.map(player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating, fresh: false }));
+    const players = snapshot.squad.map(player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating, fresh: false, stamina: staminaAt(player.id, player.position) }));
     for (const change of changes) {
+      if (change.swap) {
+        const a = players.findIndex(player => player.id === change.swap[0]), b = players.findIndex(player => player.id === change.swap[1]);
+        if (a < 0 || b < 0) continue;
+        const first = players[a], second = players[b];
+        players[a] = { ...second, position: first.position }; players[b] = { ...first, position: second.position };
+        continue;
+      }
       const index = players.findIndex(player => player.id === change.off), incoming = snapshot.bench.find(player => player.id === change.on);
-      if (index >= 0 && incoming) players[index] = { id: incoming.id, name: incoming.name, position: players[index].position, positions: incoming.positions, rating: incoming.rating, fresh: true };
+      if (index >= 0 && incoming) players[index] = { id: incoming.id, name: incoming.name, position: players[index].position, positions: incoming.positions, rating: incoming.rating, fresh: true, stamina: 100 };
     }
     return players;
   }
   function secondHalfTeam(snapshot, changes = []) {
-    const entries = lineupAfter(snapshot, changes).map(player => ({ ...player, rating: player.rating * (1 - (player.fresh ? 0 : FATIGUE[player.position] || .05)) }));
+    const entries = lineupAfter(snapshot, changes).map(player => ({ ...player, rating: secondHalfRating(player) }));
     return { ...snapshot, ...rate(entries, snapshot.formation) };
   }
   // Instant matchdays make up to three sensible changes: the most tired outfield starters for the best bench fit.
   function autoChanges(snapshot) {
     if (!snapshot.bench?.length) return [];
     const changes = [], used = new Set();
-    const tired = snapshot.squad.filter(player => player.position !== 'GK').sort((a, b) => (FATIGUE[b.position] || 0) - (FATIGUE[a.position] || 0) || a.rating - b.rating);
+    const tired = lineupAfter(snapshot).filter(player => player.position !== 'GK').sort((a, b) => a.stamina - b.stamina || a.rating - b.rating);
     for (const starter of tired) {
       if (changes.length >= 3) break;
       const option = snapshot.bench.filter(player => !used.has(player.id) && !player.positions.includes('GK') && naturalRank(starter.position, player.positions) >= 0).sort((a, b) => b.rating - a.rating)[0];
-      if (option && option.rating >= starter.rating * (1 - (FATIGUE[starter.position] || .05)) - 2) { used.add(option.id); changes.push({ off: starter.id, on: option.id }); }
+      if (option && option.rating >= secondHalfRating(starter) - 2) { used.add(option.id); changes.push({ off: starter.id, on: option.id }); }
     }
     return changes;
   }
@@ -392,6 +408,6 @@
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, FATIGUE, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);

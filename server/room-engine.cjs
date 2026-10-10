@@ -143,9 +143,8 @@ function autoDraft(room) {
     game = auction.place(game, manager.id, entry.id, index).game;
   });
   if (game.config.subs) for (const manager of game.managers) {
-    const keeper = game.pool.find(entry => !used.has(entry.id) && entry.player.positions.includes('GK'));
-    const outfield = game.pool.filter(entry => !used.has(entry.id) && entry !== keeper && !entry.player.positions.includes('GK')).slice(0, 4);
-    for (const entry of [keeper, ...outfield]) { used.add(entry.id); game = auction.buy({ ...game, phase: 'revealed', currentId: entry.id }, manager.id, Math.max(1, draft.rating(entry, game.config.mode) - 65)).game; }
+    const outfield = game.pool.filter(entry => !used.has(entry.id) && !entry.player.positions.includes('GK')).slice(0, 5);
+    for (const entry of outfield) { used.add(entry.id); game = auction.buy({ ...game, phase: 'revealed', currentId: entry.id }, manager.id, Math.max(1, draft.rating(entry, game.config.mode) - 65)).game; }
   }
   room.game = { ...game, currentId: game.sales.at(-1).playerId, phase: 'complete' }; room.status = 'complete';
 }
@@ -278,6 +277,7 @@ function apply(room, uid, command, now) {
       break;
     }
     case 'substitute':
+    case 'swapHalf':
     case 'undoSub':
     case 'readyHalf': {
       const pending = room.league?.pending;
@@ -290,8 +290,12 @@ function apply(room, uid, command, now) {
       const mine = pending.changes[fixture.id][side];
       if (command.type === 'readyHalf') { pending.ready[me.managerId] = command.ready === true; break; }
       if (command.type === 'undoSub') { if (!mine.length) fail('There is no change to undo.'); mine.pop(); pending.ready[me.managerId] = false; break; }
-      if (mine.length >= 5) fail('You have made all five substitutions.', 409);
       const onPitch = leagueCore.lineupAfter(snapshot, mine);
+      if (command.type === 'swapHalf') {
+        if (!Array.isArray(command.swap) || command.swap.length !== 2 || command.swap[0] === command.swap[1] || !command.swap.every(id => onPitch.some(player => player.id === id))) fail('Choose two players on the pitch to swap.');
+        mine.push({ swap: [command.swap[0], command.swap[1]] }); pending.ready[me.managerId] = false; break;
+      }
+      if (mine.filter(change => change.on).length >= 5) fail('You have made all five substitutions.', 409);
       if (!onPitch.some(player => player.id === command.off)) fail('Choose a player who is on the pitch.');
       if (!snapshot.bench?.some(player => player.id === command.on) || mine.some(change => change.on === command.on)) fail('Choose a substitute from your bench.');
       mine.push({ off: command.off, on: command.on }); pending.ready[me.managerId] = false; break;
@@ -373,7 +377,7 @@ function view(room, uid) {
   // Planned Premier League results stay on the server until each matchday is played.
   const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion, competition: room.league.competition || 'friends', nextDerby: leagueCore.nextDerbyRound(room.league), subs: !!room.league.subs, pending: room.league.pending || null };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
-    isHost: room.hostUid === uid, me: me.managerId, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
+    isHost: room.hostUid === uid, me: me.managerId, preview: room.config.competition === 'premier' && room.game && !room.league ? premierClubs(room.game).map(club => ({ name: club.name, strength: club.strength })) : null, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
     keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };
 }
 module.exports = { FIELD, premierClubs, RoomError, create, pack, unpack, join, apply, view, resolve, leading, finished, linkNext, seasons, players };

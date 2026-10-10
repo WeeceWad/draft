@@ -13,7 +13,7 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
   try {
     const pages = await Promise.all(Array.from({ length: 3 }, async () => { const context = await browser.newContext({ viewport: { width: 390, height: 844 } }); const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); await page.goto(base); await page.locator('[data-do=setup]').waitFor(); return page; }));
     const [host, guest, third] = pages;
-    await host.locator('[data-do=setup]').click(); await host.locator('#host-name').fill('Alex'); await host.locator('#formation').selectOption('4-1-2-1-2 (diamond)');
+    await host.locator('[data-do=setup]').click(); await host.locator('#host-name').fill('Alex'); await host.locator('#formation').selectOption('4-1-2-1-2 (diamond)'); assert.equal(await host.locator('#capacity').inputValue(), '2', 'Rooms default to two managers'); await host.locator('#capacity').selectOption('3');
     await host.locator('#create-form .primary').click(); await host.locator('.big-code').waitFor();
     const code = await host.locator('.big-code').innerText();
     assert(await host.locator('[data-do=start]').isDisabled());

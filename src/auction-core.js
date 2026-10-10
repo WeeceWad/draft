@@ -21,7 +21,10 @@
     if (!shape || !Number.isInteger(managerCount) || managerCount < 2 || managerCount > 8) return { error: 'Choose a formation and between 2 and 8 managers.' };
     const size = subs ? 16 : 11;
     if (eligible.length < managerCount * size) return { error: `You need at least ${managerCount * size} different players. Widen your season or rating range.` };
-    const needs = Array.from({ length: managerCount }, () => [...shape.map(slot => slot.position), ...(subs ? draft.BENCH : [])]).flat();
+    // Each bench is five random outfield roles from the formation, so substitutes vary from manager to manager.
+    const outfield = shape.filter(slot => slot.position !== 'GK').map(slot => slot.position);
+    const bench = () => shuffle(outfield, random).slice(0, 5);
+    const needs = Array.from({ length: managerCount }, () => [...shape.map(slot => slot.position), ...(subs ? bench() : [])]).flat();
     const byPosition = new Map();
     for (const position of new Set(needs)) {
       const indexes = eligible.flatMap((entry, i) => {

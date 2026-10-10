@@ -68,11 +68,10 @@
   const FREE = 'Free';
   const poolShape = formation => formations[formation === FREE ? '4-3-3' : formation];
   const formationOf = (game, manager) => formations[manager?.formation] ? manager.formation : formations[game.config.formation] ? game.config.formation : '4-3-3';
-  // Substitutes mode: 16-player squads, an XI plus a bench with a second keeper.
-  const BENCH = ['GK', 'CB', 'CM', 'CM', 'ST'];
+  // Substitutes mode: 16-player squads, an XI plus five outfield substitutes. One keeper per squad either way.
   const squadSize = config => config?.subs ? 16 : 11;
-  const keepersNeeded = config => config?.subs ? 2 : 1;
-  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, BENCH, squadSize, keepersNeeded };
+  const keepersNeeded = () => 1;
+  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, squadSize, keepersNeeded };
   if (typeof module !== 'undefined') module.exports = api;
   else scope.DraftCore = api;
 })(globalThis);
