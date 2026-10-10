@@ -5,13 +5,13 @@ The online version is ready to deploy. Render runs both the HTML game and its No
 ## What you need to do
 
 1. Create a **private GitHub repository** for this project. Upload the project files, preserving the `src`, `server`, `scripts`, `docs` and `data/38-0` folders. Include `package.json`, `package-lock.json` and `render.yaml` at the repository root. Do not upload `node_modules`, `.env`, `.test-data` or screenshots. If using GitHub's web upload, enable hidden files in Windows Explorer so you can also upload `.gitignore`. The generated `public` folder is rebuilt by Render.
-2. Sign into [Render](https://dashboard.render.com/), choose **New → Blueprint**, connect GitHub and select your repository. Render reads `render.yaml` and proposes a Node web service called `touchline-auction` and a PostgreSQL database called `touchline-db` in Frankfurt.
-3. Check that both the web service and database show the **Free** compute plan, then deploy. The Blueprint now requests free plans. You do not need to enter database credentials: Render supplies `DATABASE_URL` from the linked database. The app creates its tables automatically. If your setup page still shows a paid plan, go back and start the Blueprint setup again so Render reads the latest commit.
+2. Create a free PostgreSQL database at [Neon](https://neon.tech) (its free plan does not expire). Open the project, click **Connect**, and copy the connection string that starts with `postgresql://`.
+3. Sign into [Render](https://dashboard.render.com/), choose **New → Blueprint**, connect GitHub and select your repository. Render reads `render.yaml` and proposes a free Node web service called `touchline-auction`. When it asks for `DATABASE_URL`, paste the Neon connection string, then deploy. The app creates its tables automatically.
 4. Open the web service's public **HTTPS URL** when it shows **Live**. Create a room, share the URL/code with friends, and have everyone join from their own device. Each participant presses **I'm ready**; the host starts the auction.
 
 The build installs packages, builds the HTML and runs the automated server/database tests. The start command is `npm start`; the health endpoint is `/health`. Keep this a **Web Service**, because multiplayer needs the Node server and WebSockets. [Render's Node guide](https://render.com/docs/deploy-node-express-app) and [Blueprint reference](https://render.com/docs/blueprint-spec) cover these settings.
 
-Both resources use `plan: free`. This is a free trial deployment with useful limits: the web service sleeps after 15 minutes without traffic and can take around a minute to wake; free PostgreSQL expires after 30 days. The app cannot function after the database expires until a working database is connected. Only one free PostgreSQL database can be active per Render workspace. See [Render's free plan limits](https://render.com/docs/free). A permanent database would need a separate hosting decision before the trial ends; this configuration does not automatically upgrade you to a paid plan.
+The web service uses Render's free plan: it never expires, but it sleeps after 15 minutes without traffic and can take around a minute to wake. Neon's free database also pauses when idle and wakes in about a second. Render's own free PostgreSQL is not used because it expires 30 days after creation. See [Render's free plan limits](https://render.com/docs/free) and [Neon's pricing](https://neon.tech/pricing).
 
 ## Try it on this computer
 
@@ -61,7 +61,7 @@ The lobby host can remove a manager. Host controls can be handed to another room
 
 The server validates every action, serializes conflicting room changes with database row locks, and checks auction deadlines when processing bids. PostgreSQL notifications broadcast room changes to connected devices. Absolute deadlines survive restarts; overdue auctions settle on startup. The live connection reconnects automatically after interruptions. [Render supports inbound WebSockets on web services](https://render.com/docs/websocket).
 
-To release updates, push source changes to the connected repository; Render rebuilds the app. Keep the database and the same public domain to retain browser identities. Do not delete the database between releases.
+To release updates, push source changes to the connected repository; Render rebuilds the app. Keep the Neon database and the same public domain to retain browser identities.
 
 ## Verification
 

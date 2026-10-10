@@ -1,5 +1,6 @@
-# Creates the live Node service and its persistent database together.
-# Free hosting for trying the game. Free PostgreSQL expires after 30 days.
+# The live Node service on Render's free plan. Game data lives in an external
+# PostgreSQL database (Neon's free plan, which does not expire): set DATABASE_URL
+# to its connection string in the Render dashboard under Environment.
 services:
   - type: web
     name: touchline-auction
@@ -15,13 +16,4 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: touchline-db
-          property: connectionString
-databases:
-  - name: touchline-db
-    region: frankfurt
-    plan: free
-    databaseName: touchline
-    user: touchline
-    ipAllowList: []
+        sync: false
