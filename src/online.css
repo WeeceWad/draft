@@ -130,3 +130,6 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .premier-preview{display:grid;max-height:420px;overflow:auto}
 .premier-preview .sale-row{padding:8px 0}
 @media(max-width:799px){.bench-places{grid-template-columns:repeat(3,1fr)}}
+.fixture-group{display:grid;gap:2px;padding-bottom:6px}
+.fixture-group .eyebrow{margin-bottom:2px}
+.history summary{color:var(--muted);cursor:pointer;padding:6px 0}
