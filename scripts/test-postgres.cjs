@@ -33,7 +33,9 @@ async function storeFor(directory) {
     await store.mutate(id, room => ({ room: engine.join(room, other, 'Blair', now), changed: true }));
     const act = (uid, type, details = {}) => store.mutate(id, room => engine.apply(room, uid, { type, requestId: crypto.randomUUID(), ...details }, now));
     await Promise.all([act(uid, 'ready', { ready: true }), act(other, 'ready', { ready: true })]);
-    await act(uid, 'start'); await act(uid, 'reveal'); now += 2000;
+    const changed = []; store.on('change', id => changed.push(id));
+    await act(uid, 'start');
+    assert.deepEqual(changed, [id], 'Each saved change is broadcast without LISTEN/NOTIFY'); await act(uid, 'reveal'); now += 2000;
     const bids = await Promise.allSettled([act(uid, 'bid', { price: 100 }), act(other, 'bid', { price: 100 })]);
     assert.equal(bids.filter(result => result.status === 'fulfilled').length, 1);
     room = await store.get(id); const deadline = room.round.deadline, leading = room.round.bids[0].managerId, before = room.revision;

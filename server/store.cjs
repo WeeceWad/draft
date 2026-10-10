@@ -1,5 +1,5 @@
 const { EventEmitter } = require('node:events');
-const { Pool, Client } = require('pg');
+const { Pool } = require('pg');
 const engine = require('./room-engine.cjs');
 const schema = `
 CREATE TABLE IF NOT EXISTS draft_sessions (token_hash text PRIMARY KEY, uid uuid NOT NULL, expires_at bigint NOT NULL);
@@ -31,16 +31,14 @@ class MemoryStore extends EventEmitter {
   async close() {}
 }
 class PostgresStore extends EventEmitter {
-  constructor(url, ssl) { super(); this.options = { connectionString: url, ...(ssl ? { ssl: { rejectUnauthorized: true } } : {}) }; this.pool = new Pool({ ...this.options, max: 8, connectionTimeoutMillis: 10000 }); this.stopped = false; }
-  async init() { await this.pool.query(schema); await this.listen(); }
-  async listen() {
-    if (this.stopped) return;
-    const client = this.listener = new Client(this.options);
-    client.on('notification', message => this.emit('change', message.payload));
-    const reconnect = () => { if (!this.stopped && !this.retry) this.retry = setTimeout(() => { this.retry = null; this.listen().catch(reconnect); }, 2000); };
-    client.on('error', reconnect); client.on('end', reconnect);
-    await client.connect(); await client.query('LISTEN draft_room_change');
+  constructor(url, ssl) {
+    super();
+    this.options = { connectionString: url, ...(ssl ? { ssl: { rejectUnauthorized: true } } : {}) };
+    this.pool = new Pool({ ...this.options, max: 8, connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000 });
+    // Serverless Postgres (such as Neon) closes idle connections when it pauses; the pool reconnects on the next query.
+    this.pool.on('error', () => {});
   }
+  async init() { await this.pool.query(schema); }
   async session(hash, now) { return (await this.pool.query('SELECT uid FROM draft_sessions WHERE token_hash=$1 AND expires_at>$2', [hash, now])).rows[0]?.uid || null; }
   async saveSession(hash, uid, expiry) { await this.pool.query('INSERT INTO draft_sessions(token_hash,uid,expires_at) VALUES($1,$2,$3)', [hash, uid, expiry]); }
   async create(room) {
@@ -60,14 +58,16 @@ class PostgresStore extends EventEmitter {
         result.room.revision++;
         const deadline = result.room.round?.status === 'open' ? result.room.round.deadline : null;
         await client.query('UPDATE draft_rooms SET record=$2,deadline=$3 WHERE id=$1', [id, engine.pack(result.room), deadline]);
-        await client.query("SELECT pg_notify('draft_room_change',$1)", [id]);
       }
-      await client.query('COMMIT'); return result;
+      await client.query('COMMIT');
+      // The game runs as a single server, so it tells its own connected players once the change is saved.
+      if (result.changed) this.emit('change', id);
+      return result;
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   }
   async due(now) { return (await this.pool.query('SELECT id FROM draft_rooms WHERE deadline<=$1 AND expires_at>$1', [now])).rows.map(row => row.id); }
   async cleanup(now) { await this.pool.query('DELETE FROM draft_rooms WHERE expires_at<=$1', [now]); await this.pool.query('DELETE FROM draft_sessions WHERE expires_at<=$1', [now]); }
-  async close() { this.stopped = true; clearTimeout(this.retry); await this.listener?.end(); await this.pool.end(); }
+  async close() { await this.pool.end(); }
 }
 module.exports = { MemoryStore, PostgresStore, schema };
