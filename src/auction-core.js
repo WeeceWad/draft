@@ -85,15 +85,24 @@
     const manager = game.managers.find(manager => manager.id === managerId);
     if (!manager) return { error: 'Choose the winning manager.' };
     if (!Number.isInteger(price) || price < 0) return { error: 'Enter a whole-million price, including £0 for a free transfer.' };
-    const size = draft.squadSize(game.config);
-    if (purchases(game, managerId).length >= size) return { error: `${manager.name} already has ${size} players.` };
+    const size = draft.squadSize(game.config), signing = game.pool.find(entry => entry.id === game.currentId);
+    if (!signing?.january && purchases(game, managerId).length >= size) return { error: `${manager.name} already has ${size} players.` };
     if (price > budget(game, managerId)) return { error: `${manager.name} does not have enough budget.` };
     const sales = [...game.sales, { playerId: game.currentId, managerId, price }];
-    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: sales.length === game.pool.length ? 'complete' : 'sold' } };
+    return { game: { ...game, sales, remaining: game.remaining.filter(id => id !== game.currentId), skipped: (game.skipped || []).filter(id => id !== game.currentId), phase: game.remaining.length === 1 ? 'complete' : 'sold' } };
   }
   function pass(game) {
     if (game.phase !== 'revealed') return { error: 'There is no unsold player to pass.' };
     return { game: { ...game, skipped: [...(game.skipped || []).filter(id => id !== game.currentId), game.currentId], lastPassedId: game.currentId, currentId: null, phase: 'ready' } };
+  }
+  // January window: unsold players leave the window rather than coming back round.
+  function drop(game) {
+    if (game.phase !== 'revealed' || !game.currentId) return { error: 'There is no unsold player to release.' };
+    const remaining = game.remaining.filter(id => id !== game.currentId);
+    return { game: { ...game, remaining, skipped: (game.skipped || []).filter(id => id !== game.currentId), dropped: [...(game.dropped || []), game.currentId], currentId: null, lastPassedId: null, phase: remaining.length ? 'ready' : 'complete' } };
+  }
+  function addJanuary(game, entries) {
+    return { ...game, pool: [...game.pool, ...entries.map(entry => ({ ...entry, january: true }))], remaining: entries.map(entry => entry.id), skipped: [], currentId: null, lastPassedId: null, returning: false, phase: 'ready' };
   }
   function undo(game) {
     if (!game.sales.length || !['sold', 'complete'].includes(game.phase)) return { error: 'You can undo the most recent sale before spinning again.' };
@@ -114,9 +123,9 @@
     return { ...game, managers: game.managers.map(manager => manager.id === managerId ? { ...manager, board: manager.board.map(id => id === playerId ? null : id) } : manager) };
   }
   function serialise(game) {
-    return { version: 1, config: game.config, pool: game.pool.map(entry => ({ id: entry.id, clubId: entry.season.clubId, season: entry.season.season, allocatedPosition: entry.allocatedPosition })),
+    return { version: 1, config: game.config, pool: game.pool.map(entry => ({ id: entry.id, clubId: entry.season.clubId, season: entry.season.season, allocatedPosition: entry.allocatedPosition, ...(entry.january ? { january: true } : {}) })),
       managers: game.managers, remaining: game.remaining, skipped: game.skipped || [], returning: game.returning === true,
-      currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId };
+      currentId: game.currentId, phase: game.phase, sales: game.sales, lastPassedId: game.lastPassedId, dropped: game.dropped || [] };
   }
   function restore(saved, players) {
     try {
@@ -131,9 +140,9 @@
         const player = playerMap.get(record.id);
         const season = player.clubSeasons.find(season => season.clubId === record.clubId && season.season === record.season);
         if (!season || !candidates([{ ...player, clubSeasons: [season] }], config).length) throw Error('Invalid saved pool');
-        return { id: player.id, player, season, allocatedPosition: record.allocatedPosition };
+        return { id: player.id, player, season, allocatedPosition: record.allocatedPosition, ...(record.january === true ? { january: true } : {}) };
       });
-      if ((config.subs !== undefined && typeof config.subs !== 'boolean') || pool.length !== config.managerCount * draft.squadSize(config) || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
+      if ((config.subs !== undefined && typeof config.subs !== 'boolean') || pool.filter(entry => !entry.january).length !== config.managerCount * draft.squadSize(config) || new Set(pool.map(entry => entry.id)).size !== pool.length) return null;
       let game = createGame(config, pool);
       // Replay sales through normal validation to rebuild budgets and ownership.
       for (const sale of saved.sales) {
@@ -142,6 +151,10 @@
         if (result.error) return null;
         game = result.game;
       }
+      // Players released unsold in a January window are gone from the auction.
+      const dropped = Array.isArray(saved.dropped) ? saved.dropped : [];
+      if (dropped.some(id => !game.remaining.includes(id) || !pool.find(entry => entry.id === id)?.january)) return null;
+      game = { ...game, remaining: game.remaining.filter(id => !dropped.includes(id)), dropped: dropped.slice() };
       if (saved.managers.length !== config.managerCount || !['ready', 'revealed', 'sold', 'complete'].includes(saved.phase)) return null;
       const managers = game.managers.map((manager, i) => {
         const record = saved.managers[i], owned = new Set(purchases(game, manager.id).map(sale => sale.playerId));
@@ -153,7 +166,8 @@
         || new Set(saved.remaining).size !== saved.remaining.length || saved.remaining.some(id => !game.remaining.includes(id))) return null;
       if (saved.phase === 'revealed' && !game.remaining.includes(saved.currentId)) return null;
       if (saved.phase === 'ready' && saved.currentId !== null) return null;
-      if (['sold', 'complete'].includes(saved.phase) && saved.currentId !== game.sales.at(-1)?.playerId) return null;
+      // A finished January window can end on a released player rather than a sale.
+      if ((saved.phase === 'sold' || (saved.phase === 'complete' && saved.currentId !== null)) && saved.currentId !== game.sales.at(-1)?.playerId) return null;
       if ((saved.phase === 'complete') !== (game.remaining.length === 0)) return null;
       // Old saves can retain their most recent pass; new saves preserve the whole queue.
       const skipped = saved.skipped === undefined ? (game.remaining.includes(saved.lastPassedId) && saved.lastPassedId !== saved.currentId ? [saved.lastPassedId] : []) : saved.skipped;
@@ -163,6 +177,6 @@
         skipped: skipped.slice(), returning: saved.returning === true, lastPassedId: game.remaining.includes(saved.lastPassedId) ? saved.lastPassedId : null };
     } catch { return null; }
   }
-  const api = { STARTING_BUDGET, shuffle, candidates, balance, makePool, createGame, purchases, budget, reveal, buy, pass, undo, place, unplace, serialise, restore };
+  const api = { STARTING_BUDGET, shuffle, candidates, balance, makePool, createGame, purchases, budget, reveal, buy, pass, drop, addJanuary, undo, place, unplace, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.AuctionCore = api;
 })(globalThis);

@@ -11,12 +11,12 @@ const FIELD = [['Manchester City', 88, 'manchester-city'], ['Arsenal', 86, 'arse
 // squad from our data as a 4-3-3, without anyone the managers drafted.
 const clubCache = new Map();
 function premierClubs(game) {
-  const key = `${game.managers.length}:${game.pool.map(entry => entry.id).join(',')}`;
+  const key = `${game.managers.length}:${game.pool.filter(entry => !entry.january).map(entry => entry.id).join(',')}`;
   if (!clubCache.has(key)) { if (clubCache.size > 50) clubCache.clear(); clubCache.set(key, buildClubs(game)); }
   return clubCache.get(key);
 }
 function buildClubs(game) {
-  const taken = new Set(game.pool.map(entry => entry.id)), slots = draft.formations['4-3-3'];
+  const taken = new Set(game.pool.filter(entry => !entry.january).map(entry => entry.id)), slots = draft.formations['4-3-3'];
   return FIELD.slice(0, 20 - game.managers.length).map(([name, strength, clubId]) => {
     const counts = new Map();
     for (const player of players) for (const season of player.clubSeasons) if (season.clubId === clubId) counts.set(season.season, (counts.get(season.season) || 0) + 1);
@@ -30,7 +30,8 @@ function buildClubs(game) {
       used.add(pick.player.id);
       return { id: pick.player.id, name: pick.player.name, position: slot.position, positions: pick.player.positions.slice(), rating: pick.rating };
     }).filter(Boolean);
-    return { id: `club:${clubId}`, name, strength, season: latest, squad };
+    const club = clubMap.get(clubId);
+    return { id: `club:${clubId}`, name, strength, season: latest, squad, kit: club?.color || '#ffffff', alternates: [club?.secondaryColor, club?.thirdColor].filter(Boolean) };
   });
 }
 const clubsFor = room => room.config.competition === 'premier' && room.game ? premierClubs(room.game) : [];
@@ -43,7 +44,7 @@ function name(value) {
 function settings(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) fail('Choose between 2 and 8 managers.');
   const config = { managerCount: capacity, names: Array.from({ length: capacity }, (_, i) => `Manager ${i + 1}`), formation: input.formation,
-    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, subs: input.subs === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
+    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, subs: input.subs === true, form: input.form === true, cup: input.cup === true, january: input.january === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
   if (!draft.poolShape(config.formation) || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
     || config.seasonFrom > config.seasonTo || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax)
     || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax) fail('Choose valid formation, seasons and ratings.');
@@ -97,6 +98,7 @@ const hasKeeper = (room, managerId) => keeperCount(room, managerId) > 0;
 // Every squad gets its keepers (one, or two with substitutes): keeper owners skip extra keepers,
 // and a manager's last spots are saved for the keepers they still need.
 function canBuy(room, managerId, playerId) {
+  if (room.game.pool.find(entry => entry.id === playerId)?.january) return true;
   const size = draft.squadSize(room.game.config), need = draft.keepersNeeded(room.game.config);
   const count = auction.purchases(room.game, managerId).length, keepers = keeperCount(room, managerId);
   if (count >= size) return false;
@@ -124,10 +126,16 @@ function resolve(room, now, force = false) {
     room.game = result.game; room.round.status = 'sold';
     room.round.winnerId = bid[0]; room.round.price = bid[1];
     if (room.game.phase === 'complete') room.status = 'complete';
+  } else if (room.game.pool.find(entry => entry.id === room.game.currentId)?.january) {
+    // January: an unsold player is released rather than coming back round.
+    room.game = auction.drop(room.game).game;
+    room.round.status = 'released'; room.round.winnerId = null;
+    if (room.game.phase === 'complete') room.status = 'complete';
   } else {
     room.game = auction.pass(room.game).game;
     room.round.status = 'passed'; room.round.winnerId = null;
   }
+  if (room.window?.stage === 'auction' && room.game.phase === 'complete') room.window = { ...room.window, stage: 'arrange' };
   room.round.finishedAt = now;
   return true;
 }
@@ -147,6 +155,20 @@ function autoDraft(room) {
     for (const entry of outfield) { used.add(entry.id); game = auction.buy({ ...game, phase: 'revealed', currentId: entry.id }, manager.id, Math.max(1, draft.rating(entry, game.config.mode) - 65)).game; }
   }
   room.game = { ...game, currentId: game.sales.at(-1).playerId, phase: 'complete' }; room.status = 'complete';
+}
+// XIs lock when the league starts, and reopen while the January window's signings are being placed.
+const lineupsLocked = room => !room.game || (!!room.league && room.window?.stage !== 'arrange');
+// January window: two players per manager from the room's filters, drawn from the best not already in play.
+function januaryPlayers(room) {
+  const game = room.game, count = 2 * game.managers.length, random = leagueCore.seeded((room.seed ^ 0x6a616e75) >>> 0);
+  const taken = new Set([...game.pool.map(entry => entry.id), ...(room.league?.teams || []).filter(item => item.club).flatMap(item => item.squad.map(player => player.id))]);
+  const best = candidate => Math.max(...candidate.seasons.map(season => draft.rating({ player: candidate.player, season }, game.config.mode)));
+  const options = auction.candidates(players, game.config).filter(candidate => !taken.has(candidate.player.id))
+    .sort((a, b) => best(b) - best(a) || a.player.id.localeCompare(b.player.id)).slice(0, Math.max(count * 6, 48));
+  return auction.shuffle(options, random).slice(0, count).map(candidate => {
+    const season = game.config.mode === 'season' ? candidate.seasons.slice().sort((a, b) => b.seasonRating - a.seasonRating)[0] : candidate.seasons[Math.floor(random() * candidate.seasons.length)];
+    return { id: candidate.player.id, player: candidate.player, season, allocatedPosition: candidate.player.positions[0] };
+  });
 }
 function apply(room, uid, command, now) {
   if (room.expiresAt <= now) fail('This room has expired. Create a new room.', 404);
@@ -178,6 +200,8 @@ function apply(room, uid, command, now) {
       const config = { ...room.config, names: room.members.map(member => member.name) };
       const pool = auction.makePool(players, config, leagueCore.seeded(room.seed));
       if (pool.error) fail(pool.error);
+      // Anyone who has not picked a kit gets the first free colour; kits never clash.
+      for (const member of room.members) if (!member.kit) member.kit = Object.keys(draft.KITS).find(kit => !room.members.some(other => other.kit === kit));
       room.game = auction.createGame(config, pool.pool); room.status = 'draft';
       if (config.devMode) autoDraft(room);
       break;
@@ -205,7 +229,12 @@ function apply(room, uid, command, now) {
       room.round.offers[me.managerId] = amount;
       room.round.bids = [...room.round.bids, { managerId: me.managerId, price: amount, at: now }].slice(-12);
       if (room.round.startedAt === null) { room.round.startedAt = now; room.round.deadline = now + 60000; }
-      else room.round.deadline += 10000;
+      else {
+        // Late-bid protection: every bid adds 10 seconds, and a bid in the final seconds always leaves at least 15 to answer it.
+        const extended = room.round.deadline + 10000, floor = now + 15000;
+        if (extended < floor) room.round.late = (room.round.late || 0) + 1;
+        room.round.deadline = Math.max(extended, floor);
+      }
       resolve(room, now); break;
     }
     case 'withdraw':
@@ -218,18 +247,18 @@ function apply(room, uid, command, now) {
       if (room.round?.status !== 'open' || leading(room)) fail('A player with a live bid cannot be skipped.', 409);
       resolve(room, now, true); break;
     case 'place': {
-      if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
+      if (lineupsLocked(room)) fail('The starting XIs are locked for the league.', 409);
       const result = auction.place(room.game, me.managerId, command.playerId, command.slot);
       if (result.error) fail(result.error, 403);
       room.game = result.game; break;
     }
     case 'unplace':
-      if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
+      if (lineupsLocked(room)) fail('The starting XIs are locked for the league.', 409);
       if (!auction.purchases(room.game, me.managerId).some(sale => sale.playerId === command.playerId)) fail('You can only move your own players.', 403);
       room.game = auction.unplace(room.game, me.managerId, command.playerId); break;
     case 'formation': {
       // Free rooms: each manager picks a shape. Players move to the best-fitting spots in it.
-      if (!room.game || room.league) fail('Formations are locked for the league.', 409);
+      if (lineupsLocked(room)) fail('Formations are locked for the league.', 409);
       if (room.game.config.formation !== draft.FREE) fail('This room uses a fixed formation.');
       if (!draft.formations[command.formation]) fail('Choose a formation.');
       const manager = room.game.managers.find(manager => manager.id === me.managerId), current = draft.formationOf(room.game, manager);
@@ -237,11 +266,11 @@ function apply(room, uid, command, now) {
       room.game = { ...room.game, managers: room.game.managers.map(item => item.id === manager.id ? { ...item, formation: command.formation, board } : item) }; break;
     }
     case 'clearBoard': {
-      if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
+      if (lineupsLocked(room)) fail('The starting XIs are locked for the league.', 409);
       room.game = { ...room.game, managers: room.game.managers.map(manager => manager.id === me.managerId ? { ...manager, board: Array(11).fill(null) } : manager) }; break;
     }
     case 'autoPlace': {
-      if (!room.game || room.league) fail('The starting XIs are locked for the league.', 409);
+      if (lineupsLocked(room)) fail('The starting XIs are locked for the league.', 409);
       const manager = room.game.managers.find(manager => manager.id === me.managerId);
       const unplaced = auction.purchases(room.game, me.managerId).filter(sale => !manager.board.includes(sale.playerId)).map(sale => room.game.pool.find(entry => entry.id === sale.playerId));
       const squad = manager.board.map(id => id ? room.game.pool.find(entry => entry.id === id) : unplaced.shift() || null);
@@ -259,21 +288,57 @@ function apply(room, uid, command, now) {
     case 'playRound':
     case 'finishLeague': {
       host(room, uid);
-      if (!room.league || room.league.round >= leagueCore.roundCount(room.league)) fail('There is no matchday left to play.', 409);
+      const event = room.league && leagueCore.nextEvent(room.league);
+      if (!event) fail('There is nothing left to play.', 409);
       if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
       if (room.league.pending) fail('Kick off the second half first.', 409);
-      // Only manager-v-manager matchdays play live; the rest of a Premier League season is instant.
-      const derby = room.league.fixtures.some(fixture => fixture.round === room.league.round && leagueCore.managerDerby(room.league, fixture));
-      const view = room.matchView === 'pitch' ? 'pitch' : 'classic';
+      if (room.window && room.window.stage !== 'done') fail('Finish the January transfer window first.', 409);
+      if (event === 'window') fail('Open the January transfer window first.', 409);
+      if (command.type === 'finishLeague') {
+        // Everything instant, stopping at the January window if it is still to come.
+        room.live = null;
+        for (let next = leagueCore.nextEvent(room.league); next && next !== 'window'; next = leagueCore.nextEvent(room.league)) room.league = leagueCore.advance(room.league).league;
+        break;
+      }
+      // Only games between managers play live; the rest are instant.
+      const derby = leagueCore.eventHasDerby(room.league), view = room.matchView === 'pitch' ? 'pitch' : 'classic';
+      if (event === 'cup') {
+        room.live = derby ? { cup: true, cupRound: room.league.cup.round, round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view, from: 0, to: 97 } : null;
+        room.league = leagueCore.playCupRound(room.league).league;
+        break;
+      }
       if (command.type === 'playRound' && derby && room.league.subs) {
         // Substitutes mode: play the first half, then stop for half-time changes.
         room.league = leagueCore.startRound(room.league).league;
         room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view] / 2, view, from: 0, to: 48, half: 1 };
         break;
       }
-      if (command.type === 'playRound' && derby) room.live = { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view, from: 0, to: 97 };
-      else room.live = null;
-      do { room.league = leagueCore.playRound(room.league).league; } while (command.type === 'finishLeague' && room.league.round < leagueCore.roundCount(room.league));
+      room.live = derby ? { round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view, from: 0, to: 97 } : null;
+      room.league = leagueCore.playRound(room.league).league;
+      break;
+    }
+    case 'openWindow': {
+      host(room, uid);
+      if (!room.league || leagueCore.nextEvent(room.league) !== 'window' || room.window) fail('The January window is not open yet.', 409);
+      if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
+      room.game = auction.addJanuary(room.game, januaryPlayers(room));
+      room.status = 'draft'; room.round = null; room.window = { stage: 'auction', openedAt: now };
+      break;
+    }
+    case 'closeWindow': {
+      host(room, uid);
+      if (room.window?.stage !== 'arrange') fail('Finish the window auction first.', 409);
+      const short = room.game.managers.filter(manager => manager.board.filter(Boolean).length !== 11);
+      if (short.length) fail(`Every XI needs 11 players: ${short.map(manager => manager.name).join(', ')}.`);
+      room.league = leagueCore.applyWindow(room.league, room.game, Object.fromEntries(room.game.managers.map(manager => [manager.id, manager.board.slice()]))).league;
+      room.window = { ...room.window, stage: 'done' };
+      break;
+    }
+    case 'kit': {
+      if (!draft.KITS[command.kit]) fail('Choose a kit colour.');
+      if (me.kit) fail('Your kit colour is locked in.', 409);
+      if (room.members.some(member => member.kit === command.kit)) fail('Another manager already wears that colour.', 409);
+      me.kit = command.kit;
       break;
     }
     case 'substitute':
@@ -312,12 +377,12 @@ function apply(room, uid, command, now) {
     case 'skipToDerby': {
       host(room, uid);
       if (room.league?.pending) fail('Kick off the second half first.', 409);
-      if (!room.league || room.league.round >= leagueCore.roundCount(room.league)) fail('There is no matchday left to play.', 409);
+      if (!room.league || !leagueCore.nextEvent(room.league)) fail('There is nothing left to play.', 409);
       if (room.live && room.live.endsAt > now) fail('Wait for the matchday in play to finish.', 409);
-      const stop = leagueCore.nextDerbyRound(room.league);
-      if (stop === room.league.round) fail('The next matchday is a manager match. Play it live.', 409);
+      if (room.window && room.window.stage !== 'done') fail('Finish the January transfer window first.', 409);
+      if (leagueCore.eventHasDerby(room.league)) fail('The next game is a manager match. Play it live.', 409);
       room.live = null;
-      while (room.league.round < (stop ?? leagueCore.roundCount(room.league))) room.league = leagueCore.playRound(room.league).league;
+      for (let next = leagueCore.nextEvent(room.league); next && next !== 'window' && !leagueCore.eventHasDerby(room.league); next = leagueCore.nextEvent(room.league)) room.league = leagueCore.advance(room.league).league;
       break;
     }
     case 'matchView':
@@ -351,7 +416,7 @@ function apply(room, uid, command, now) {
   if (command.requestId) room.seen = [...room.seen, `${uid}:${command.requestId}`].slice(-100);
   return { room, changed: true };
 }
-const finished = room => !!room.league && room.league.round >= leagueCore.roundCount(room.league);
+const finished = room => !!room.league && leagueCore.nextEvent(room.league) === null;
 // Point a finished room at its rematch. The first rematch wins; later callers join it.
 function linkNext(room, uid, next) {
   member(room, uid);
@@ -361,7 +426,7 @@ function linkNext(room, uid, next) {
 }
 function entryView(entry) {
   return { id: entry.id, player: { id: entry.id, name: entry.player.name, positions: entry.player.positions, nationality: entry.player.nationality, peakRating: entry.player.peakRating },
-    season: entry.season, club: clubMap.get(entry.season.clubId) };
+    season: entry.season, club: clubMap.get(entry.season.clubId), ...(entry.january ? { january: true } : {}) };
 }
 function view(room, uid) {
   const me = member(room, uid);
@@ -375,9 +440,10 @@ function view(room, uid) {
     unseenCount: room.game.remaining.filter(id => !skipped.includes(id) && !(room.game.phase === 'revealed' && id === room.game.currentId)).length,
     remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
   // Planned Premier League results stay on the server until each matchday is played.
-  const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion, competition: room.league.competition || 'friends', nextDerby: leagueCore.nextDerbyRound(room.league), subs: !!room.league.subs, pending: room.league.pending || null };
+  const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion, competition: room.league.competition || 'friends', nextDerby: leagueCore.nextDerbyRound(room.league), subs: !!room.league.subs, pending: room.league.pending || null,
+    form: !!room.league.form, cup: room.league.cup || null, window: room.league.window ? { after: room.league.window.after, done: room.league.window.done } : null, nextEvent: leagueCore.nextEvent(room.league) };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
     isHost: room.hostUid === uid, me: me.managerId, preview: room.config.competition === 'premier' && room.game && !room.league ? premierClubs(room.game).map(club => ({ name: club.name, strength: club.strength })) : null, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
-    keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid })), game, round, league };
+    keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid, kit: member.kit || null })), window: room.window || null, game, round, league };
 }
 module.exports = { FIELD, premierClubs, RoomError, create, pack, unpack, join, apply, view, resolve, leading, finished, linkNext, seasons, players };

@@ -71,7 +71,17 @@
   // Substitutes mode: 16-player squads, an XI plus five outfield substitutes. One keeper per squad either way.
   const squadSize = config => config?.subs ? 16 : 11;
   const keepersNeeded = () => 1;
-  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, squadSize, keepersNeeded };
+  // Kit colours: each manager picks one, unique in the room and locked once chosen.
+  // Twelve kits that stay clearly distinct from one another (perceptual colour distance above 140 for every pair).
+  const KITS = { red: { name: 'Red', hex: '#e53935' }, sky: { name: 'Sky blue', hex: '#4fc3f7' }, white: { name: 'White', hex: '#f5f5f5' }, yellow: { name: 'Yellow', hex: '#fdd835' },
+    purple: { name: 'Purple', hex: '#8e24aa' }, pink: { name: 'Pink', hex: '#f48fb1' }, navy: { name: 'Navy', hex: '#1a237e' }, black: { name: 'Black', hex: '#1b1b1b' },
+    orange: { name: 'Orange', hex: '#fb8c00' }, teal: { name: 'Teal', hex: '#00897b' }, claret: { name: 'Claret', hex: '#7b1131' }, lime: { name: 'Lime', hex: '#c6ff00' } };
+  const rgb = hex => [1, 3, 5].map(index => parseInt(String(hex).slice(index, index + 2), 16) || 0);
+  // Redmean distance: a cheap approximation of how different two colours look.
+  const colourDistance = (a, b) => { const [r1, g1, b1] = rgb(a), [r2, g2, b2] = rgb(b), mean = (r1 + r2) / 2; return Math.sqrt((2 + mean / 256) * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + (2 + (255 - mean) / 256) * (b1 - b2) ** 2); };
+  const clash = (a, b) => colourDistance(a, b) < 130;
+  const textOn = hex => { const [r, g, b] = rgb(hex); return .299 * r + .587 * g + .114 * b > 150 ? '#0c1018' : '#ffffff'; };
+  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, squadSize, keepersNeeded, KITS, colourDistance, clash, textOn };
   if (typeof module !== 'undefined') module.exports = api;
   else scope.DraftCore = api;
 })(globalThis);

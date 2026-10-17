@@ -148,6 +148,119 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   assert(subs.league.fixtures.every(item => item.result.halfTime && item.result.subs));
   assert.deepEqual(engine.unpack(engine.pack(subs)).league.fixtures, subs.league.fixtures, 'Substitutes seasons replay exactly');
 }
+// Kit colours: unique in the room, locked once picked, and everyone has one by kick-off.
+{
+  let kits = lobby();
+  kits = command(kits, 'a', 'kit', { kit: 'red' });
+  assert.throws(() => command(kits, 'b', 'kit', { kit: 'red' }), /already wears/);
+  assert.throws(() => command(kits, 'a', 'kit', { kit: 'sky' }), /locked/);
+  assert.throws(() => command(kits, 'b', 'kit', { kit: 'tartan' }), /Choose a kit/);
+  kits = command(kits, 'a', 'start');
+  const colours = kits.members.map(member => member.kit);
+  assert.equal(colours[0], 'red'); assert(colours.every(Boolean)); assert.equal(new Set(colours).size, colours.length, 'Kits never clash');
+  assert.deepEqual(engine.view(kits, 'b').members.map(member => member.kit), colours);
+}
+// Late-bid protection: a bid in the final seconds always leaves at least fifteen to answer it.
+{
+  let late = command(lobby(), 'a', 'start');
+  late = command(late, 'a', 'reveal'); time += 2000;
+  late = command(late, 'a', 'bid', { price: 5 });
+  time = late.round.deadline - 2000;
+  late = command(late, 'b', 'bid', { price: 6 });
+  assert.equal(late.round.deadline, time + 15000); assert.equal(late.round.late, 1);
+  const before = late.round.deadline; time += 1000; late = command(late, 'c', 'bid', { price: 7 });
+  assert.equal(late.round.deadline, before + 10000, 'Ordinary bids still add ten seconds when that leaves more'); assert.equal(late.round.late, 1);
+}
+const finishSeason = (state, uid = 'a') => { for (let guard = 0; guard < 400 && !engine.finished(state); guard++) { if (state.live) time = Math.max(time, state.live.endsAt); state = command(state, uid, league.eventHasDerby(state.league) ? 'playRound' : 'finishLeague'); } return state; };
+// Player form: a 3-10 score from recent matches moves ratings; seasons still replay exactly.
+{
+  let form = lobby();
+  form = command(form, 'a', 'settings', { capacity: 3, config: { ...config, devMode: true, form: true } });
+  form.members.forEach(member => { form = command(form, member.uid, 'ready', { ready: true }); });
+  form = command(form, 'a', 'start'); form = command(form, 'a', 'startLeague');
+  assert.equal(form.league.form, true);
+  for (let round = 0; round < 3; round++) { form = command(form, 'a', 'playRound'); time = form.live.endsAt; }
+  const table = league.formTable(form.league);
+  assert(table.size > 0 && [...table.values()].every(value => value >= 3 && value <= 10));
+  const snapshot = form.league.teams[0], shaped = league.formed(form.league, snapshot);
+  assert.equal(shaped.squad.length, 11);
+  shaped.squad.forEach(player => { const base = snapshot.squad.find(item => item.id === player.id).rating; assert(Math.abs(player.rating - (base + (league.formOf(table, player.id) - 6) * .8)) < 1e-9); });
+  form = finishSeason(form);
+  assert.deepEqual(engine.unpack(engine.pack(form)).league.fixtures, form.league.fixtures, 'Form seasons replay exactly');
+}
+// FA Cup: a seeded bracket between league matchdays, with byes, extra time and penalties.
+{
+  let cup = lobby();
+  cup = command(cup, 'a', 'settings', { capacity: 3, config: { ...config, devMode: true, cup: true } });
+  cup.members.forEach(member => { cup = command(cup, member.uid, 'ready', { ready: true }); });
+  cup = command(cup, 'a', 'start'); cup = command(cup, 'a', 'startLeague');
+  const bracket = cup.league.cup;
+  assert.equal(bracket.size, 4); assert.deepEqual(bracket.rounds.map(round => round.name), ['Semi-finals', 'Final']);
+  assert.equal(bracket.rounds[0].ties.filter(tie => tie.bye).length, 1, 'Three managers means one bye');
+  assert(bracket.rounds[0].after < bracket.rounds[1].after && bracket.rounds[1].after <= league.roundCount(cup.league));
+  for (let round = 0; round < bracket.rounds[0].after; round++) { cup = command(cup, 'a', 'playRound'); if (cup.live) time = cup.live.endsAt; }
+  assert.equal(league.nextEvent(cup.league), 'cup', 'The cup round comes when its matchday is reached');
+  cup = finishSeason(cup);
+  assert(cup.league.cup.winnerId && cup.league.cup.round === 2, 'The cup is played to a winner');
+  for (const tie of cup.league.cup.rounds.flatMap(round => round.ties).filter(item => !item.bye)) {
+    const r = tie.result, extra = r.extraTime, pens = r.penalties;
+    assert.equal(r.homeScorers.length, r.homeGoals); assert.equal(r.awayScorers.length, r.awayGoals);
+    if (pens) assert(r.homeGoals === r.awayGoals && pens.home !== pens.away && extra);
+    else assert.notEqual(r.homeGoals, r.awayGoals);
+    assert.equal(tie.winnerId, r.homeGoals > r.awayGoals || (pens && pens.home > pens.away) ? tie.homeId : tie.awayId);
+    if (extra) assert([...r.homeScorers, ...r.awayScorers].filter(goal => goal.extra).every(goal => goal.minute > 90 && goal.minute <= 120));
+  }
+  assert.deepEqual(engine.unpack(engine.pack(cup)).league.cup, cup.league.cup, 'Cup progress replays exactly');
+  for (let seed = 0; seed < 300; seed++) {
+    const side = { squad: ['GK', 'CB', 'CM', 'ST', 'LW', 'RW'].map((position, index) => ({ id: `p${index}`, name: `P${index}`, position, positions: [position], rating: 80 })) };
+    const pens = league.shootout(side, side, seed);
+    assert.notEqual(pens.home, pens.away);
+    const home = pens.kicks.filter(kick => kick.side === 'home' && kick.scored).length, away = pens.kicks.filter(kick => kick.side === 'away' && kick.scored).length;
+    assert.deepEqual([home, away], [pens.home, pens.away]);
+  }
+  let pl = lobby();
+  pl = command(pl, 'a', 'settings', { capacity: 3, config: { ...config, devMode: true, cup: true, competition: 'premier' } });
+  pl.members.forEach(member => { pl = command(pl, member.uid, 'ready', { ready: true }); });
+  pl = command(pl, 'a', 'start'); pl = command(pl, 'a', 'startLeague');
+  assert.equal(pl.league.cup.size, 16); assert.equal(pl.league.cup.rounds.length, 4); assert.equal(pl.league.cup.rounds[0].name, 'Fifth round');
+  assert.equal(pl.league.cup.rounds[0].ties.flatMap(tie => [tie.homeId, tie.awayId]).filter(id => id.startsWith('manager')).length, 3, 'Every manager enters');
+  pl = finishSeason(pl);
+  assert(pl.league.cup.winnerId); assert(league.table(pl.league).every(row => row.played === 38));
+}
+// January window: two new players per manager at halfway, no squad limit, unsold players released.
+{
+  let jan = lobby(2);
+  jan = command(jan, 'a', 'settings', { capacity: 2, config: { ...config, devMode: true, january: true } });
+  jan.members.forEach(member => { jan = command(jan, member.uid, 'ready', { ready: true }); });
+  jan = command(jan, 'a', 'start'); jan = command(jan, 'a', 'startLeague');
+  assert.equal(jan.league.window.after, 1);
+  jan = command(jan, 'a', 'playRound'); time = jan.live.endsAt;
+  assert.equal(league.nextEvent(jan.league), 'window');
+  assert.throws(() => command(jan, 'a', 'playRound'), /Open the January/);
+  assert.throws(() => command(jan, 'b', 'openWindow'), /Only the host/);
+  jan = command(jan, 'a', 'openWindow');
+  const signings = jan.game.pool.filter(entry => entry.january);
+  assert.equal(signings.length, 4); assert.equal(jan.status, 'draft'); assert.equal(jan.window.stage, 'auction');
+  assert.equal(engine.unpack(engine.pack(jan)).game.pool.filter(entry => entry.january).length, 4, 'A restart during the window keeps it');
+  for (let index = 0; index < 4; index++) {
+    jan = command(jan, 'a', 'reveal'); time += 2000;
+    if (index === 3) { jan = command(jan, 'a', 'withdraw'); jan = command(jan, 'b', 'withdraw'); assert.equal(jan.round.status, 'released'); }
+    else { jan = command(jan, 'b', 'withdraw'); jan = command(jan, 'a', 'bid', { price: 10 }); assert.equal(jan.round.status, 'sold'); }
+    assert.equal(engine.unpack(engine.pack(jan)).game.remaining.length, jan.game.remaining.length, 'Window progress survives a restart');
+  }
+  assert.equal(auction.purchases(jan.game, 'manager-1').length, 14, 'January has no squad limit');
+  assert.equal(jan.status, 'complete'); assert.equal(jan.window.stage, 'arrange');
+  const newcomer = signings.find(entry => jan.game.sales.some(sale => sale.playerId === entry.id));
+  jan = command(jan, 'a', 'place', { playerId: newcomer.id, slot: 9 });
+  assert.equal(jan.game.managers[0].board[9], newcomer.id, 'New signings can be placed during the window');
+  jan = command(jan, 'a', 'closeWindow');
+  assert.equal(jan.window.stage, 'done'); assert(jan.league.teams[0].squad.some(player => player.id === newcomer.id), 'The new XI plays from the next matchday');
+  assert.throws(() => command(jan, 'a', 'place', { playerId: newcomer.id, slot: 8 }), /locked/);
+  jan = finishSeason(jan);
+  const restored = engine.unpack(engine.pack(jan));
+  assert.deepEqual(restored.league.fixtures, jan.league.fixtures, 'Seasons with a window replay exactly');
+  assert(restored.league.teams[0].squad.some(player => player.id === newcomer.id));
+}
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
 assert.throws(() => command(room, 'b', 'formation', { formation: '3-5-2' }), /fixed formation/);

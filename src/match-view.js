@@ -464,7 +464,7 @@
       context.beginPath(); context.arc(x, y, radius, 0, Math.PI * 2);
       context.fillStyle = player.keeper ? colours[player.side + 'Keeper'] : colours[player.side]; context.fill();
       context.lineWidth = Math.max(1, scale * .2); context.strokeStyle = '#0c1018'; context.stroke();
-      context.fillStyle = '#0c1018'; context.font = `800 ${Math.max(8, radius * 1.1)}px system-ui, sans-serif`; context.fillText(String(player.number), x, y + .5);
+      context.fillStyle = draft.textOn(player.keeper ? colours[player.side + 'Keeper'] : colours[player.side]); context.font = `800 ${Math.max(8, radius * 1.1)}px system-ui, sans-serif`; context.fillText(String(player.number), x, y + .5);
     });
     const owner = frame[3] >= 0 ? timeline.players[frame[3]] : null;
     if (owner && !fast) {
