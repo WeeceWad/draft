@@ -60,6 +60,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .summary-stat span{display:block;overflow-wrap:anywhere}
 .goals li{flex-wrap:wrap}
 .goal-assist{flex-basis:100%;font-size:11px;color:#7f8ea5}
+.subs-columns{margin-top:4px}.sub-change{font-size:12px;gap:8px!important}.sub-change .on{color:#5fd38d}.sub-change .off{color:#ff8a8a}
 .match-canvas{display:block;width:100%;border-radius:12px;background:#16492f;border:1px solid #2f5b45}
 .pitch-scoreboard{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;font-weight:800}
 .pitch-scoreboard .score{font-size:30px;color:var(--text)}
@@ -579,7 +580,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   const goalOrder = (a, b) => a.minute - b.minute || (a.stoppage ?? 0) - (b.stoppage ?? 0);
   // Match clock from 0 to 97: 45+3 is 48 and 90+4 is 97.
-  const absoluteMinute = goal => goal.minute === 45 && goal.stoppage ? 45 + goal.stoppage : goal.minute === 90 && goal.stoppage ? 93 + goal.stoppage : goal.minute <= 45 ? goal.minute : goal.minute + 3;
+  // The match clock: 0–48 first half (with stoppage), 49–97 second half, then 98–127 for extra time (91'–120').
+  const absoluteMinute = goal => goal.extra ? 97 + goal.minute - 90 : goal.minute === 45 && goal.stoppage ? 45 + goal.stoppage : goal.minute === 90 && goal.stoppage ? 93 + goal.stoppage : goal.minute <= 45 ? goal.minute : goal.minute + 3;
   const fromAbsolute = value => value <= 45 ? { minute: value } : value <= 48 ? { minute: 45, stoppage: value - 45 } : value <= 93 ? { minute: value - 3 } : { minute: 90, stoppage: value - 93 };
   const minuteLabel = goal => goal.stoppage ? `${goal.minute}+${goal.stoppage}′` : `${goal.minute}′`;
   // As in 38-0, no two goals in a match share a minute: clashes move later, within the final whistle.
@@ -843,7 +845,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   const eventHasDerby = league => {
     const event = nextEvent(league);
-    if (event === 'cup') return cupTies(league).some(tie => !tie.bye && managerDerby(league, tie));
+    if (event === 'cup') return cupTies(league).some(tie => managerTie(league, tie));
     if (event === 'league') return league.fixtures.some(fixture => fixture.round === league.round && managerDerby(league, fixture));
     return false;
   };
@@ -921,6 +923,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     for (const fixture of league.fixtures) if (byId.get(fixture.homeId).club && byId.get(fixture.awayId).club) planned[fixture.id] = simulateMatch(byId.get(fixture.homeId), byId.get(fixture.awayId), hash(league.seed, fixture.id), tallies);
     return planned;
   }
+  const managerTie = (league, tie) => !tie.bye && [tie.homeId, tie.awayId].some(id => isManagerTeam(league.teams.find(item => item.id === id)));
   const managerDerby = (league, fixture) => { const home = league.teams.find(item => item.id === fixture.homeId), away = league.teams.find(item => item.id === fixture.awayId); return isManagerTeam(home) && isManagerTeam(away); };
   const nextDerbyRound = league => { const fixture = league.fixtures.find(item => item.round >= league.round && managerDerby(league, item)); return fixture ? fixture.round : null; };
   const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
@@ -993,7 +996,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, formTable, formOf, formed, FORM_NEUTRAL, FORM_EFFECT, drawCup, playCupRound, cupTies, nextEvent, eventHasDerby, advance, applyWindow, shootout, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, formTable, formOf, formed, FORM_NEUTRAL, FORM_EFFECT, drawCup, playCupRound, cupTies, nextEvent, eventHasDerby, advance, applyWindow, shootout, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, managerTie, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);
 </script><script>(function (scope) {
@@ -1004,7 +1007,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   // simulates exactly the same match from the same seed.
   const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
   const leagueCore = typeof module !== 'undefined' ? require('./league-core.js') : scope.LeagueCore;
-  const LENGTH = 105, WIDTH = 68, DT = .1, PLAYBACK = 1.5, END = 97, SECOND = 48.6, POST = 3.66, MARGIN = 4;
+  const LENGTH = 105, WIDTH = 68, DT = .1, PLAYBACK = 1.5, END = 97, SECOND = 48.6, EXTRA = 97, EXTRA_SECOND = 112.5, EXTRA_END = 127, POST = 3.66, MARGIN = 4;
   const WIDE = new Set(['LW', 'RW', 'LM', 'RM', 'LB', 'RB', 'LWB', 'RWB']);
   const ATTACKING = { ST: 6, LW: 4, RW: 4, CAM: 4, LM: 2, RM: 2, CM: 2, CDM: 1, LWB: 1, RWB: 1, LB: .5, RB: .5, CB: .5 };
   const clamp = (value, low, high) => value < low ? low : value > high ? high : value;
@@ -1013,7 +1016,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const surname = name => String(name || '').split(' ').at(-1);
   const round = value => Math.round(value * 100) / 100;
   function seeded(seed) { let state = seed >>> 0; return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; }; }
-  const dirsAt = abs => abs < SECOND ? { home: 1, away: -1 } : { home: -1, away: 1 };
+  const dirsAt = abs => (abs < SECOND || (abs >= EXTRA && abs < EXTRA_SECOND)) ? { home: 1, away: -1 } : { home: -1, away: 1 };
   function weighted(items, weights, random) {
     const total = weights.reduce((sum, weight) => sum + weight, 0);
     let draw = random() * total;
@@ -1028,7 +1031,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       players.push({ side, index, slot, role: slot.position, keeper: slot.position === 'GK', name: info.name || '', id: info.id, x: 0, y: 0, vx: 0, vy: 0, top: 6.4 + clamp((info.rating || 70) - 60, -10, 35) * .045, wx: 0, wy: 0, task: null });
     });
     const ball = { x: LENGTH / 2, y: WIDTH / 2, z: 0, owner: null, flight: null }, frames = [], events = [], steps = [];
-    let possession = plan.side, t = 0, climax = null, next = 0, waitUntil = 0, ended = false, deadBall = false;
+    let possession = plan.side, t = 0, climax = null, next = 0, waitUntil = 0, ended = false, deadBall = false, chaser = null;
     const teamOf = side => players.filter(p => p.side === side);
     const outfield = side => teamOf(side).filter(p => !p.keeper);
     const goalX = side => dirs[side] === 1 ? LENGTH : 0;
@@ -1039,6 +1042,12 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const nearest = (list, point) => list.slice().sort((a, b) => gap(a, point) - gap(b, point))[0];
     const say = (text, extra = {}) => events.push({ t, text, ...extra });
     const within = (point, side) => ({ x: clamp(point.x, dirs[side] === 1 ? 3 : 6, dirs[side] === 1 ? LENGTH - 6 : LENGTH - 3), y: clamp(point.y, 2, WIDTH - 2) });
+    // Offside: attackers stay level with the second-last defender (or the ball, or halfway) until the ball is played.
+    function offsideLine(side) {
+      const deepest = teamOf(other(side)).map(p => depth(side, p)).sort((a, b) => b - a);
+      return Math.max(deepest[1] ?? LENGTH / 2, depth(side, ball), LENGTH / 2);
+    }
+    const onside = (side, point, margin = .8) => { const line = offsideLine(side) - margin; return depth(side, point) <= line ? point : { x: dirs[side] === 1 ? line : LENGTH - line, y: point.y }; };
     // Team shape: lines step up and drop with the ball; the side without it stays compact and narrow.
     function shape(p) {
       const dir = dirs[p.side], u = depth(p.side, ball), attacking = possession === p.side, toX = value => dir === 1 ? value : LENGTH - value;
@@ -1050,7 +1059,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const line = clamp((100 - p.slot.y - 25) / 65, 0, 1);
       const back = attacking ? clamp(u - 32, 16, 58) : clamp(u - 20, 7, 48), front = attacking ? clamp(u + 16, 42, 96) : clamp(back + 30, 30, 75);
       const middle = WIDTH / 2, base = p.slot.x / 100 * WIDTH, spread = attacking ? (WIDE.has(p.role) ? 1.15 : 1) : .72;
-      return { x: toX(back + (front - back) * line) + p.wx, y: clamp(middle + (base - middle) * spread + (ball.y - middle) * (attacking ? .18 : .32) + p.wy, 2, WIDTH - 2) };
+      const point = { x: toX(back + (front - back) * line) + p.wx, y: clamp(middle + (base - middle) * spread + (ball.y - middle) * (attacking ? .18 : .32) + p.wy, 2, WIDTH - 2) };
+      return attacking && !deadBall ? onside(p.side, point) : point;
     }
     const aim = task => typeof task.point === 'function' ? task.point() : task.point;
     // The nearest defender presses the ball; the next one covers the space behind.
@@ -1088,9 +1098,18 @@ body.dragging,body.dragging *{cursor:grabbing!important}
         ball.z = flight.height * 4 * s * (1 - s);
         if (s >= 1) {
           ball.flight = null; ball.z = 0;
-          if (flight.receiver) { ball.owner = flight.receiver; possession = flight.receiver.side; flight.receiver.task = null; }
+          if (flight.receiver) {
+            const receiver = flight.receiver; possession = receiver.side;
+            if (gap(receiver, ball) < 1.6) { ball.owner = receiver; receiver.task = null; }
+            else { chaser = receiver; receiver.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true }; }
+          }
           if (flight.arrive) flight.arrive();
         }
+      } else if (chaser) {
+        // The ball runs on towards its receiver, who closes it down; neither ever jumps.
+        const dx = chaser.x - ball.x, dy = chaser.y - ball.y, distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < 1.2) { ball.owner = chaser; chaser.task = null; chaser = null; }
+        else { const step = Math.min(distance, 4 * DT) / distance; ball.x += dx * step; ball.y += dy * step; }
       } else if (ball.owner) {
         const owner = ball.owner, speed = Math.sqrt(owner.vx * owner.vx + owner.vy * owner.vy);
         ball.x = owner.x + (speed > .3 ? owner.vx / speed * .75 : dirs[owner.side] * .6); ball.y = owner.y + (speed > .3 ? owner.vy / speed * .75 : 0);
@@ -1099,8 +1118,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     function kick(to, speed, height, kind, receiver = null, arrive = null) {
       const from = { x: ball.x, y: ball.y }, kicker = ball.owner;
       let dur = gap(from, to) / speed + .12;
-      if (receiver && !receiver.keeper && kind !== 'shot') dur = Math.max(dur, gap(receiver, to) / (receiver.top * .95) + .1);
-      ball.owner = null; if (kicker) kicker.task = null;
+      if (receiver && !receiver.keeper && kind !== 'shot') dur = Math.max(dur, gap(receiver, to) / (receiver.top * .9) + .5);
+      ball.owner = null; chaser = null; if (kicker) kicker.task = null;
       ball.flight = { from, to, t0: t, dur, height, kind, receiver, arrive };
       if (receiver) receiver.task = { point: to, sprint: true };
     }
@@ -1108,6 +1127,13 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const insert = (...list) => steps.splice(next, 0, ...list);
     function waitFor(condition, limit) { let deadline = null; const step = () => { if (deadline === null) deadline = t + limit; if (condition() || t >= deadline) return 0; insert(step); return .2; }; return step; }
     const release = () => () => { for (const p of players) p.task = null; return 0; };
+    // Dead balls: the ball is rolled back to its spot and the taker goes to stand over it; nobody teleports.
+    const placeBall = spot => () => { ball.owner = null; chaser = null; deadBall = true; if (gap(ball, spot) > .3) kick(spot, Math.max(8, gap(ball, spot) / 2.2), 0, 'ground'); return 0; };
+    const takeAt = (p, spot, settle = .8) => [
+      () => { p.task = { point: spot, sprint: true }; return 0; },
+      waitFor(() => gap(p, spot) < 1.3, 15),
+      () => { ball.x = spot.x; ball.y = spot.y; ball.z = 0; ball.owner = p; p.task = { point: { x: p.x, y: p.y } }; return settle; },
+    ];
     const hold = seconds => () => { const owner = ball.owner; if (owner) owner.task = { point: () => ({ x: owner.x + dirs[owner.side] * 2.5, y: owner.y }) }; return seconds; };
     const carry = (seconds, target) => () => { const owner = ball.owner; if (owner) owner.task = { point: target(owner), sprint: true }; return seconds; };
     function chooseReceiver(side, from, { forward = true, min = 6, max = 36 } = {}) {
@@ -1115,13 +1141,19 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       return weighted(options, options.map(p => {
         const distance = gap(p, from), progress = depth(side, p) - depth(side, from), open = Math.min(...opponents.map(o => gap(o, p)));
         if (distance < min || distance > max) return .02;
+        if (depth(side, p) > offsideLine(side) + .2) return .01;
         return Math.max(.05, 1 + progress / 15 * (forward ? 1 : .2)) * (.5 + Math.min(open, 10) / 6);
       }), random);
     }
-    const pass = (choose, kind = 'ground') => () => {
+    const pass = (choose, kind = 'ground', waits = 0) => () => {
       const owner = ball.owner; if (!owner) return 0;
       const receiver = choose(owner);
       if (!receiver || receiver === owner) return .3;
+      // A receiver caught offside checks back before the pass is played.
+      if (waits < 12 && kind !== 'throw' && depth(receiver.side, receiver) > offsideLine(receiver.side) - .1) {
+        const back = onside(receiver.side, receiver, 2); receiver.task = { point: back, sprint: true };
+        insert(pass(() => receiver, kind, waits + 1)); return .3;
+      }
       const to = within({ x: receiver.x + receiver.vx * .7 + dirs[receiver.side] * (kind === 'long' ? 4 : 2.5), y: receiver.y + receiver.vy * .7 }, receiver.side);
       kick(to, kind === 'long' ? 21 : kind === 'throw' ? 11 : 15, kind === 'long' ? 8 : kind === 'throw' ? 2 : 0, kind, receiver);
       return 0;
@@ -1134,7 +1166,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
         say('Throw-in', { side });
         const thrower = nearest(outfield(side), spot);
         thrower.task = { point: { x: spot.x, y: line < 1 ? -.4 : WIDTH + .4 } };
-        insert(waitFor(() => gap(thrower, spot) < 1.3, 4), () => { ball.owner = thrower; possession = side; return .7; }, pass(o => chooseReceiver(side, o, { forward: false, max: 20 }), 'throw'));
+        possession = side; deadBall = true;
+        insert(...takeAt(thrower, spot, .7), () => { deadBall = false; return 0; }, pass(o => chooseReceiver(side, o, { forward: false, max: 20 }), 'throw'));
       });
       return 0;
     };
@@ -1160,32 +1193,31 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const keeper = keeperOf(side), spot = { x: ownGoalX(side) + dirs[side] * 5.5, y: WIDTH / 2 + (random() - .5) * 14 };
       return [
         release(),
-        () => { possession = side; keeper.task = { point: spot }; return 1; },
-        () => { ball.x = spot.x; ball.y = spot.y; ball.z = 0; deadBall = true; say('Goal kick', { side }); return 0; },
-        waitFor(() => gap(keeper, spot) < 1, 4),
-        () => { ball.owner = keeper; return 1.2; },
+        () => { possession = side; say('Goal kick', { side }); return 0; },
+        placeBall(spot),
+        ...takeAt(keeper, spot, 1.2),
         () => { deadBall = false; return 0; },
         pass(o => chooseReceiver(side, o, { min: 25, max: 60 }), 'long'), () => 1.2,
       ];
     }
     // Corners: attackers attack the box, defenders mark them, then the delivery.
-    function corner(side, taker, target, finish) {
-      const gx = goalX(side), dir = dirs[side], flag = { x: gx - dir * .4, y: random() < .5 ? .4 : WIDTH - .4 };
+    function corner(side, chosen, target, finish) {
+      const gx = goalX(side), dir = dirs[side], flag = { x: gx - dir * .4, y: ball.y < WIDTH / 2 ? .4 : WIDTH - .4 };
+      const taker = chosen || nearest(outfield(side).filter(p => p !== target), flag);
       const attackers = outfield(side).filter(p => p !== taker).sort((a, b) => depth(side, b) - depth(side, a)).slice(0, 5);
       if (target && !attackers.includes(target)) attackers[4] = target;
       const defending = other(side), markers = outfield(defending);
       return [
         release(),
         () => {
-          say('Corner', { side }); possession = side; ball.owner = null; taker.task = { point: flag, sprint: true };
+          say('Corner', { side }); possession = side; taker.task = { point: flag, sprint: true };
           attackers.forEach((p, index) => { p.task = { point: { x: gx - dir * (5 + (index % 3) * 3.5), y: WIDTH / 2 + (index - 2) * 3.4 } }; });
           const used = new Set();
           attackers.forEach(attacker => { const marker = nearest(markers.filter(p => !used.has(p)), attacker); if (marker) { used.add(marker); marker.task = { point: () => ({ x: attacker.x + dir, y: attacker.y }) }; } });
-          return .8;
+          return 0;
         },
-        () => { ball.x = flag.x; ball.y = flag.y; ball.z = 0; deadBall = true; return 0; },
-        waitFor(() => gap(taker, flag) < 1.3, 5),
-        () => { ball.owner = taker; return 1.4; },
+        placeBall(flag),
+        ...takeAt(taker, flag, 1.4),
         () => {
           const header = target || attackers[Math.floor(random() * attackers.length)], landing = { x: gx - dir * (6 + random() * 4), y: WIDTH / 2 + (random() - .5) * 10 };
           say(`${surname(taker.name)} swings it in`, { side }); deadBall = false;
@@ -1200,10 +1232,21 @@ body.dragging,body.dragging *{cursor:grabbing!important}
         },
       ];
     }
-    function shoot(shooter, outcome, { header = false, speed: strike = null, height = null } = {}) {
+    const RANGE = 22;
+    function shoot(shooter, outcome, options = {}) {
+      const { header = false, speed: strike = null, height = null, setPiece = false, tries = 0 } = options;
       return () => {
         const side = shooter.side, gx = goalX(side), dir = dirs[side], defending = other(side), keeper = keeperOf(defending);
-        if (ball.owner !== shooter) ball.owner = shooter;
+        if (ball.owner !== shooter) {
+          // A teammate has it: they find the shooter first. A loose ball: the shooter goes and gets it.
+          if (ball.owner && ball.owner.side === side && tries < 3) { insert(pass(() => shooter), shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0; }
+          ball.owner = null; chaser = shooter; shooter.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true };
+          insert(shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0;
+        }
+        if (!setPiece && !header && tries < 8 && gap(shooter, { x: gx, y: WIDTH / 2 }) > RANGE) {
+          const aim = { x: gx - dir * (13 + random() * 6), y: WIDTH / 2 + clamp(shooter.y - WIDTH / 2, -14, 14) * .55 };
+          insert(carry(1.4, () => aim), shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0;
+        }
         if (outcome !== 'goal') climax ??= t;
         deadBall = false;
         const speed = strike ?? (header ? 16 : 26), sign = random() < .5 ? -1 : 1;
@@ -1227,8 +1270,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
           say(`${surname(shooter.name)} shoots`, { side });
           kick(to, 20, 1, 'shot', null, () => {
             say(`Blocked by ${surname(blocker?.name)}`, { side: defending });
-            const taker = outfield(side).find(p => WIDE.has(p.role) && p.role !== 'LB' && p.role !== 'RB') || outfield(side)[0];
-            insert(...corner(side, taker, null, random() < .35 ? 'claim' : 'clear'));
+            insert(...corner(side, null, null, random() < .35 ? 'claim' : 'clear'));
           });
         }
         return 0;
@@ -1240,15 +1282,16 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const foul = kind === 'penalty' ? { x: gx - dir * (8 + random() * 6), y: WIDTH / 2 + (random() - .5) * 18 } : spot;
       const toGoal = { x: gx - spot.x, y: WIDTH / 2 - spot.y }, length = Math.sqrt(toGoal.x * toGoal.x + toGoal.y * toGoal.y) || 1, ux = toGoal.x / length, uy = toGoal.y / length;
       return [
-        carry(1.8, () => foul),
+        () => { const owner = ball.owner; if (owner) owner.task = { point: foul, sprint: true }; return 0; },
+        waitFor(() => !ball.owner || gap(ball.owner, foul) < 2, 14),
         () => { const fouler = nearest(outfield(defending), ball); fouler.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true }; return .8; },
         () => {
           say(`Foul on ${surname(victim.name)}`, { side });
           say(kind === 'penalty' ? 'Penalty!' : 'Free kick in a dangerous position', { side, setPiece: kind });
-          ball.owner = null; possession = side; deadBall = true;
+          ball.owner = null; chaser = null; possession = side; deadBall = true;
           for (const p of players) p.task = null;
-          ball.x = spot.x; ball.y = spot.y; ball.z = 0;
-          taker.task = { point: { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 } };
+          if (gap(ball, spot) > .3) kick(spot, clamp(gap(ball, spot) / 1.5, 6, 14), 0, 'ground');
+          taker.task = { point: { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 }, sprint: true };
           keeper.task = { point: kind === 'penalty' ? { x: gx, y: WIDTH / 2 } : { x: gx - dir * .8, y: WIDTH / 2 + (spot.y < WIDTH / 2 ? 1.6 : -1.6) } };
           if (kind === 'penalty') {
             // Everyone else waits outside the box, level with or behind the spot.
@@ -1263,9 +1306,9 @@ body.dragging,body.dragging *{cursor:grabbing!important}
           }
           return 2.8;
         },
-        () => { taker.task = { point: { x: spot.x, y: spot.y } }; return .6; },
-        () => { ball.owner = taker; ball.x = spot.x; ball.y = spot.y; return .5; },
-        shoot(taker, outcome, kind === 'penalty' ? { speed: 24, height: .6 } : { speed: 22, height: 3.4 }),
+        waitFor(() => gap(taker, { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 }) < 1.3, 12),
+        ...takeAt(taker, spot, .5),
+        shoot(taker, outcome, kind === 'penalty' ? { speed: 24, height: .6, setPiece: true } : { speed: 22, height: 3.4, setPiece: true }),
         () => 1, release(),
       ];
     }
@@ -1280,7 +1323,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       const style = plan.style || (assister ? (WIDE.has(assister.role) || random() < .35 ? 'cross' : 'through') : 'solo');
       if (style === 'penalty' || style === 'freekick') {
         const victim = style === 'penalty' ? finisher : outfield(side).filter(p => p !== finisher).sort((a, b) => (ATTACKING[b.role] || 0) - (ATTACKING[a.role] || 0))[0] || finisher;
-        start(side, 40 + random() * 15);
+        start(side, 55 + random() * 12);
         insert(...buildUp(side, 1 + Math.floor(random() * 2), victim), ...setPiece(side, style, finisher, victim, outcome));
         return;
       }
@@ -1288,7 +1331,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
         // A shot deflected behind, then the real assister's corner and the real scorer's header.
         const shooter = outfield(side).find(p => p !== finisher && p !== assister) || finisher;
         start(side, 55 + random() * 15);
-        insert(...buildUp(side, 1, shooter), carry(1, o => within({ x: gx - dir * 20, y: o.y }, side)), () => {
+        const edge = { x: gx - dir * (18 + random() * 4), y: WIDTH / 2 + (random() - .5) * 20 };
+        insert(...buildUp(side, 1, shooter), () => { if (ball.owner) ball.owner.task = { point: edge, sprint: true }; return 0; }, waitFor(() => !ball.owner || gap(ball.owner, edge) < 2.5, 7), () => {
           say(`${surname(shooter.name)} shoots`, { side });
           kick({ x: gx + dir, y: WIDTH / 2 + (random() < .5 ? -1 : 1) * (POST + 3) }, 20, 1, 'shot', null, () => {
             say('Deflected behind', { side: other(side) });
@@ -1298,18 +1342,30 @@ body.dragging,body.dragging *{cursor:grabbing!important}
         });
         return;
       }
-      start(side, 25 + random() * 22);
+      start(side, style === 'solo' ? 42 + random() * 16 : 25 + random() * 22);
       if (style === 'cross') {
+        // The winger reaches the byline area; the striker times the run to stay onside until the cross.
         const run = { x: gx - dir * (6 + random() * 5), y: WIDTH / 2 + (random() - .5) * 8 };
+        let wing = null;
         insert(...buildUp(side, n, assister),
-          () => { const owner = ball.owner; if (owner) owner.task = { point: { x: gx - dir * 13, y: owner.y < WIDTH / 2 ? 6 : WIDTH - 6 }, sprint: true }; finisher.task = { point: run, sprint: true }; return 2.2; },
-          () => { say(`${surname(ball.owner?.name)} crosses`, { side }); kick(run, 20, 5, 'cross', finisher); return 0; },
+          () => { const owner = ball.owner; if (owner) { wing = { x: gx - dir * (11 + random() * 6), y: owner.y < WIDTH / 2 ? 5 + random() * 5 : WIDTH - 5 - random() * 5 }; owner.task = { point: wing, sprint: true }; } finisher.task = { point: () => onside(side, run, 1.2), sprint: true }; return 0; },
+          waitFor(() => !ball.owner || !wing || gap(ball.owner, wing) < 2.5, 6),
+          waitFor(() => depth(side, finisher) < offsideLine(side) - .2, 2),
+          () => {
+            if (depth(side, finisher) > offsideLine(side) - .1) { insert(pass(() => finisher)); return 0; }
+            say(`${surname(ball.owner?.name || assister.name)} crosses`, { side }); kick(run, 20, 5, 'cross', finisher); return 0;
+          },
           shoot(finisher, outcome, { header: true }));
       } else if (style === 'through') {
+        // The runner waits on the last defender's shoulder and only goes when the pass is played.
         const run = { x: gx - dir * (14 + random() * 5), y: WIDTH / 2 + (random() - .5) * 18 };
         insert(...buildUp(side, n, assister),
-          () => { finisher.task = { point: run, sprint: true }; return .7; },
-          () => { say(`${surname(ball.owner?.name)} slides it through`, { side }); kick(run, 17, 0, 'through', finisher); return 0; },
+          () => { finisher.task = { point: () => onside(side, run, 1.2), sprint: true }; return .8; },
+          waitFor(() => depth(side, finisher) < offsideLine(side) - .2, 3),
+          () => {
+            if (depth(side, finisher) > offsideLine(side) - .1) { insert(pass(() => finisher)); return 0; }
+            say(`${surname(ball.owner?.name || assister.name)} slides it through`, { side }); kick(run, 17, 0, 'through', finisher); return 0;
+          },
           carry(.6, o => ({ x: o.x + dir * 4, y: o.y + (WIDTH / 2 - o.y) * .2 })),
           shoot(finisher, outcome));
       } else {
@@ -1335,7 +1391,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const record = () => frames.push([round(ball.x), round(ball.y), round(ball.z), ball.owner ? players.indexOf(ball.owner) : -1, ...players.flatMap(p => [round(p.x), round(p.y)])]);
     record();
     for (let index = 0; index < 600 && !ended; index++) {
-      while (!ended && !ball.flight && t >= waitUntil) {
+      while (!ended && !ball.flight && !chaser && t >= waitUntil) {
         if (next >= steps.length) { ended = true; break; }
         waitUntil = t + (steps[next++]() || 0);
       }
@@ -1351,7 +1407,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const teams = { home: { squad: home.squad, slots: slotsOf(home) }, away: { squad: away.squad, slots: slotsOf(away) } };
     const goals = [...result.homeScorers.map(goal => ({ ...goal, side: 'home' })), ...result.awayScorers.map(goal => ({ ...goal, side: 'away' }))].map(goal => ({ ...goal, abs: leagueCore.absoluteMinute(goal) }));
     // One half at a time in substitutes mode: only what happens between from and to is played out.
-    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }].filter(plan => plan.abs >= from && plan.abs < to);
+    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }, { kind: 'kickoff', side: 'home', abs: EXTRA, priority: 3 }, { kind: 'kickoff', side: 'away', abs: EXTRA_SECOND, priority: 3 }].filter(plan => plan.abs >= from && plan.abs < to);
     let penalties = 0;
     goals.filter(goal => goal.abs > from - (from ? 0 : 1) && goal.abs <= to).forEach(goal => {
       const roll = random();
@@ -1363,7 +1419,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     function chance(side, priority) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const abs = from + 4 + random() * (to - from - 7);
-        if (Math.abs(abs - SECOND) < 2.5 || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
+        if ([SECOND, EXTRA, EXTRA_SECOND].some(mark => Math.abs(abs - mark) < 2.5) || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
         const roll = random(), set = random(), style = set < .015 && penalties === 0 ? 'penalty' : set < .11 ? 'freekick' : null;
         if (style === 'penalty') penalties++;
         const outcome = style ? (roll < .55 ? 'saved' : 'wide') : roll < .4 ? 'saved' : roll < .72 ? 'wide' : 'blocked';
@@ -1415,13 +1471,15 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const events = highlights.flatMap(item => item.events.filter(event => event.t >= item.cut).map(event => ({ ...event, abs: event.goal ? item.plan.abs : item.a0 + (event.t - item.cut) / 60 })));
     if (from < 48 && to >= 48) events.push({ abs: 48, text: 'Half-time' });
     if (to === END) events.push({ abs: END, text: 'Full time' });
-    return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights };
+    if (to > END) events.push({ abs: END, text: 'Level after 90 minutes · extra time' }, { abs: EXTRA_SECOND, text: 'Half-time in extra time' }, { abs: to, text: 'End of extra time' });
+    return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights, to };
   }
   const pieceAt = (timeline, r) => timeline.pieces.find(piece => r < piece.r1) || timeline.pieces.at(-1);
   function clockAt(timeline, r) {
     const piece = pieceAt(timeline, r);
-    if (r >= piece.r1) return Math.min(END, piece.a1);
-    return Math.min(END, piece.a0 + (piece.a1 - piece.a0) * clamp((r - piece.r0) / Math.max(.001, piece.r1 - piece.r0), 0, 1));
+    const end = timeline.to ?? END;
+    if (r >= piece.r1) return Math.min(end, piece.a1);
+    return Math.min(end, piece.a0 + (piece.a1 - piece.a0) * clamp((r - piece.r0) / Math.max(.001, piece.r1 - piece.r0), 0, 1));
   }
   function frameOf(item, seconds) {
     const position = clamp(seconds / DT, 0, item.frames.length - 1), low = Math.floor(position), high = Math.min(item.frames.length - 1, low + 1), s = position - low;
@@ -1599,7 +1657,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let squadFilter = 'all', halfSelected = null, selectedOff = null, selectedOn = null, allFixtures = false, resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let squadFilter = 'all', halfSelected = null, selectedOff = null, selectedOn = null, allFixtures = false, resumable = null, rulesDraft = null, rulesTimer = null, rulesState = '', rulesSaving = false, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
   let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
@@ -1721,8 +1779,31 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   const matchesRoom = values => ruleKeys.every(key => values[key] === savedRules()[key]);
   function lobbyRules() {
     if (!room.isHost) return rules(room.config);
-    const values = rulesDraft || savedRules(), changed = !!rulesDraft && !matchesRoom(rulesDraft);
-    return `<form id="rules-form" class="stack rules-form"><div class="row"><h2>Room rules</h2>${changed ? '<span class="pill">Unsaved changes</span>' : ''}</div>${ruleFields(values, room.members.length)}<div class="actions"><button class="primary" ${disabled(!changed || !connected || busy)}>Save rules</button>${changed ? '<button type="button" class="quiet" data-do="discard-rules">Discard</button>' : ''}</div><p class="hint">£1bn each · 11 players each · bids from £1m · 60 seconds from the first bid, +10 per bid. Saving new rules asks everyone to ready up again.</p></form>`;
+    const values = rulesDraft || savedRules();
+    return `<form id="rules-form" class="stack rules-form"><div class="row"><h2>Room rules</h2><span id="rules-state" class="pill ${rulesState === 'saved' ? 'green' : ''}" ${rulesState ? '' : 'hidden'}>${rulesLabel()}</span></div>${ruleFields(values, room.members.length)}<p class="hint">£1bn each · 11 players each · bids from £1m · 60 seconds from the first bid, +10 per bid. Changes save automatically and everyone readies up again.</p></form>`;
+  }
+  const rulesLabel = () => ({ pending: 'Saving…', saving: 'Saving…', saved: 'Saved ✓', error: 'Not saved' }[rulesState] || '');
+  function showRulesState() { const pill = $('#rules-state'); if (!pill) return; pill.hidden = !rulesState; pill.textContent = rulesLabel(); pill.classList.toggle('green', rulesState === 'saved'); }
+  // Host rule changes save themselves shortly after the last edit, so what the lobby shows is always what the room plays.
+  function queueRules() {
+    const form = $('#rules-form'); if (!form) return;
+    rulesDraft = readRules(form); rulesState = 'pending'; showRulesState();
+    clearTimeout(rulesTimer); rulesTimer = setTimeout(saveRules, 450);
+  }
+  async function saveRules() {
+    if (!rulesDraft || !room || room.status !== 'lobby') { rulesDraft = null; return; }
+    if (rulesSaving) { clearTimeout(rulesTimer); rulesTimer = setTimeout(saveRules, 250); return; }
+    if (matchesRoom(rulesDraft)) { rulesDraft = null; rulesState = 'saved'; showRulesState(); return; }
+    const sent = rulesDraft, { capacity, ...config } = sent; rulesSaving = true; rulesState = 'saving'; showRulesState();
+    try {
+      await api('/api/action', { roomId: room.id, command: { type: 'settings', requestId: crypto.randomUUID(), capacity, config } });
+      rulesState = 'saved';
+    } catch (error) { toast(error.message); rulesState = 'error'; if (rulesDraft === sent) rulesDraft = null; }
+    finally {
+      rulesSaving = false;
+      if (rulesDraft === sent) { rulesDraft = null; render(); }
+      else showRulesState();
+    }
   }
   function setup() {
     return `<div class="settings stack"><div class="row"><div><div class="eyebrow">Before kick-off</div><h1 class="gap-top">Your auction rules</h1></div><button class="quiet" data-do="home">Back</button></div><form id="create-form" class="panel stack"><div class="field"><label for="host-name">Your manager name</label><input id="host-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div>${ruleFields({ capacity: 2, competition: 'friends', formation: Object.keys(DraftCore.formations)[0], mode: 'peak', seasonFrom: seasons[0], seasonTo: seasons.at(-1), ratingMin: 40, ratingMax: 95 })}<p class="hint">The server selects a hidden, balanced pool with enough players for the chosen formation, including one goalkeeper per manager. These rules stay fixed for the game.</p><button class="primary" ${disabled(busy)}>Create room & get your code →</button></form></div>`;
@@ -1738,7 +1819,12 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     return `<div class="room-head row"><div><div class="eyebrow">The dressing room</div><h1 class="gap-top">Waiting for your managers</h1></div><span class="pill">${room.members.length}/${room.capacity} joined</span></div><div class="grid lobby-grid"><section class="panel stack"><h2>Share your room code</h2><div class="big-code">${room.code}</div><div class="actions"><button data-do="copy-code">Copy code</button><button data-do="share">Share invite</button></div><p class="hint">Open this game on another device and enter the code. The room lasts 24 hours.</p></section><section class="panel stack"><h2>Your managers</h2>${kitPicker()}<div>${room.members.map(member => `<div class="member"><div class="avatar" style="${member.kit ? `background:${DraftCore.KITS[member.kit].hex};color:${DraftCore.textOn(DraftCore.KITS[member.kit].hex)}` : ''}">${esc(member.name.slice(0, 1).toUpperCase())}</div><div class="grow"><strong>${esc(member.name)}${member.managerId === room.me ? ' (you)' : ''}</strong><small>${member.isHost ? 'Host · ' : ''}${member.ready ? 'Ready to draft' : 'Not ready yet'}</small></div>${room.isHost && member.managerId !== room.me ? `<button class="quiet danger" data-do="kick" data-id="${member.managerId}" aria-label="Remove ${esc(member.name)}">×</button>` : `<span class="pill ${member.ready ? 'green' : ''}">${member.ready ? 'Ready' : 'Waiting'}</span>`}</div>`).join('')}</div><button class="${me.ready ? 'quiet' : 'primary'}" data-do="ready" ${disabled(!connected || busy)}>${me.ready ? 'Not ready' : 'I’m ready'}</button>${room.isHost ? `<button class="primary" data-do="start" ${disabled(!allReady || !connected || busy)}>Start the auction →</button><p class="hint">Everyone must join and be ready before you start.</p>` : '<p class="hint">Your host starts once everyone is ready.</p>'}</section></div><section class="panel stack lobby-rules">${room.isHost ? lobbyRules() : `<h2>Room rules</h2>${rules(room.config)}`}</section>${roomFooter()}`;
   }
   function roomFooter() { return `<details class="gap-top"><summary class="hint">Room options</summary><div class="footer-actions"><button class="quiet" data-do="leave">Return to home</button>${room.isHost ? `<select id="next-host" aria-label="Choose next host">${room.members.filter(member => member.managerId !== room.me).map(member => `<option value="${member.managerId}">${esc(member.name)}</option>`).join('')}</select><button class="quiet" data-do="transferHost" ${disabled(!connected || busy || room.members.length < 2)}>Hand over host</button>` : ''}</div><p class="hint gap-top">Leaving this page keeps your place in the room. Closing the browser does not withdraw a live bid. Hand over hosting before the host leaves.</p></details>`; }
-  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${[['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League'], ...(room.league?.cup ? [['cup', '🏆 Cup']] : []), ...(room.finished ? [['summary', '★ Summary']] : [])].map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
+  // Once the season is under way the auction is history: its tab only returns for the January window's auction.
+  const auctionOpen = () => !room.league || room.status === 'draft';
+  const tabsFor = () => room.league
+    ? [...(room.status === 'draft' ? [['auction', '◎ January auction']] : []), ['league', '♜ League'], ['teams', '▣ Teams'], ...(room.league.cup ? [['cup', '🏆 Cup']] : []), ['transfers', '⇄ Transfers'], ...(room.finished ? [['summary', '★ Summary']] : [])]
+    : [['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League']];
+  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${tabsFor().map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
   function auctionScreen() {
     const round = room.round, player = round && entry(round.playerId), spinning = round?.status === 'open' && clock() < round.opensAt;
     const open = round?.status === 'open', out = round?.withdrawn.includes(room.me), leader = round?.leader;
@@ -1785,9 +1871,15 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   function transfersScreen() { return `<section class="panel stack"><div class="row"><h2>Transfer board</h2><span class="pill">${room.game.sales.length} signings</span></div><p>Every deal, ordered from the biggest fee to the smallest.</p><div>${room.game.sales.slice().sort((a, b) => b.price - a.price).map((sale, i) => { const player = entry(sale.playerId); return `<div class="sale-row"><span class="muted">${i + 1}</span><div style="flex:1"><strong>${esc(player.player.name)} ${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</strong><small>${positions(player.player.positions)} ${esc(memberName(sale.managerId))} · ${esc(player.season.season)}</small></div><span class="price">${money(sale.price)}</span><button class="quiet" data-do="team" data-id="${sale.managerId}" aria-label="View ${esc(memberName(sale.managerId))}’s team">XI</button></div>`; }).join('') || '<div class="empty">No deals yet. The auction is where it all starts.</div>'}</div></section>`; }
   const liveNow = () => room?.live && clock() < room.live.endsAt ? room.live : null;
-  const liveClock = live => { const from = live.from ?? 0, to = live.to ?? MatchView.END; return Math.max(from, Math.min(to, from + (clock() - live.startsAt) / (live.endsAt - live.startsAt) * (to - from))); };
+  // A cup matchday can run on into extra time (clock 97–127) and then a shoot-out, revealed one kick at a time.
+  const PEN_INTRO_MS = 2500, PEN_KICK_MS = 1400;
+  const liveSpan = live => live.endsAt - live.startsAt - (live.pensMs || 0);
+  const liveClock = live => { const from = live.from ?? 0, to = live.to ?? MatchView.END; return Math.max(from, Math.min(to, from + (clock() - live.startsAt) / liveSpan(live) * (to - from))); };
+  const pensShown = live => { if (!live?.pensMs) return -1; const elapsed = clock() - live.startsAt - liveSpan(live); return elapsed < 0 ? -1 : Math.max(0, Math.floor((elapsed - PEN_INTRO_MS) / PEN_KICK_MS) + 1); };
+  // Where a fixture's own clock stops: 97 unless it is a level cup tie that goes to extra time.
+  const fixtureEnd = (live, fixture) => Math.min(live.to ?? MatchView.END, fixture.result?.extraTime ? 127 : MatchView.END);
   const liveMinute = live => Math.floor(liveClock(live));
-  const clockLabel = value => value <= 45 ? `${value}′` : value <= 48 ? `45+${value - 45}′` : value <= 93 ? `${value - 3}′` : `90+${value - 93}′`;
+  const clockLabel = value => value <= 45 ? `${value}′` : value <= 48 ? `45+${value - 45}′` : value <= 93 ? `${value - 3}′` : value <= 97 ? `90+${value - 93}′` : `${Math.min(120, value - 7)}′`;
   const pitchColours = { home: '#6cb4ff', homeKeeper: '#ffd84d', away: '#ff7b7b', awayKeeper: '#c792ff' };
   function watchedFixture(live) {
     const fixtures = liveFixtures(live);
@@ -1797,35 +1889,54 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const key = `${room.id}:${live.startsAt}:${fixture.id}:${live.from ?? 0}`;
     if (!timelines.has(key)) {
       if (timelines.size > 20) timelines.clear();
-      const team = id => room.league.teams.find(team => team.id === id), index = liveFixtures(live).indexOf(fixture);
-      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0, duration: (live.endsAt - live.startsAt) / 1000, from: live.from ?? 0, to: live.to ?? MatchView.END }));
+      const index = liveFixtures(live).indexOf(fixture), second = (live.from ?? 0) >= 48;
+      const team = (id, side) => { const snapshot = room.league.teams.find(team => team.id === id), made = fixture.result.subs?.[side]; return second && made?.length && snapshot ? { ...snapshot, squad: LeagueCore.lineupAfter(snapshot, made) } : snapshot; };
+      const from = live.from ?? 0, to = fixtureEnd(live, fixture), share = (to - from) / ((live.to ?? MatchView.END) - from);
+      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId, 'home'), away: team(fixture.awayId, 'away'), seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0, duration: liveSpan(live) * share / 1000, from, to }));
     }
     return timelines.get(key);
   }
-  const liveFixtures = live => live.cup ? (room.league.cup?.rounds[live.cupRound]?.ties || []).filter(tie => !tie.bye && tie.result && isManager(tie.homeId) && isManager(tie.awayId)) : room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))))
+  const liveFixtures = live => live.cup ? (room.league.cup?.rounds[live.cupRound]?.ties || []).filter(tie => !tie.bye && tie.result && (isManager(tie.homeId) || isManager(tie.awayId))) : room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))))
     .map(fixture => fixture.result ? fixture : { ...fixture, result: room.league.pending?.firstHalf?.[fixture.id] }).filter(fixture => fixture.result);
   const realSeconds = live => Math.max(0, (clock() - live.startsAt) / 1000);
-  const fixtureClock = (live, fixture) => live.view === 'pitch' ? MatchView.clockAt(timelineFor(live, fixture), realSeconds(live)) : liveClock(live);
+  const fixtureClock = (live, fixture) => live.view === 'pitch' ? MatchView.clockAt(timelineFor(live, fixture), realSeconds(live)) : Math.min(fixtureEnd(live, fixture), liveClock(live));
   const goalsNow = live => liveFixtures(live).reduce((sum, fixture) => { const minute = fixtureClock(live, fixture); return sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length; }, 0);
   // Scorers sit under their own team, one per line, with the minute beside them.
-  function fixtureCard(fixture, minute = Infinity) {
+  function fixtureCard(fixture, minute = Infinity, live = null) {
     const result = fixture.result, upTo = goals => (goals || []).filter(goal => LeagueCore.absoluteMinute(goal) <= minute);
     const home = upTo(result?.homeScorers), away = upTo(result?.awayScorers);
     const list = goals => goals.map(goal => `<li><span class="goal-name">${esc(goal.name)}</span><span class="goal-minute">${LeagueCore.minuteLabel(goal)}</span>${goal.assistName ? `<span class="goal-assist">Assist: ${esc(goal.assistName)}</span>` : ''}</li>`).join('');
-    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${kitDot(fixture.homeId)}${esc(teamName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(teamName(fixture.awayId))}${kitDot(fixture.awayId)}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}${minute === Infinity && result?.penalties ? `<p class="hint pens">Penalties ${result.penalties.home}–${result.penalties.away} · ${result.penalties.kicks.map(kick => `${kick.side === 'home' ? '◀' : '▶'}${kick.scored ? '✓' : '✗'}`).join(' ')}</p>` : minute === Infinity && result?.extraTime ? '<p class="hint pens">After extra time</p>' : ''}</div>`;
+    const changes = side => minute >= 48 ? (result?.subs?.[side] || []).filter(change => change.on).map(change => { const snapshot = room.league.teams.find(team => team.id === fixture[side + 'Id']); return `<li class="sub-change"><span class="on">▲ ${esc(onPitchName(snapshot, change.on))}</span><span class="off">▼ ${esc(onPitchName(snapshot, change.off))}</span></li>`; }).join('') : '';
+    const subsList = changes('home') || changes('away') ? `<div class="goal-columns subs-columns"><ul class="goals">${changes('home')}</ul><ul class="goals away">${changes('away')}</ul></div>` : '';
+    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${kitDot(fixture.homeId)}${esc(teamName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(teamName(fixture.awayId))}${kitDot(fixture.awayId)}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}${subsList}${cardNote(fixture, minute, live)}</div>`;
+  }
+  function cardNote(fixture, minute, live) {
+    const result = fixture.result; if (!result) return '';
+    const shown = minute === Infinity ? Infinity : pensShown(live);
+    if (result.penalties && shown >= 0) {
+      const kicks = result.penalties.kicks.slice(0, shown), count = side => kicks.filter(kick => kick.side === side && kick.scored).length, last = kicks.at(-1);
+      const marks = kicks.map(kick => `${kick.side === 'home' ? '◀' : '▶'}${kick.scored ? '✓' : '✗'}`).join(' ');
+      const done = shown >= result.penalties.kicks.length;
+      return `<p class="hint pens">${done ? `${esc(teamName(result.penalties.home > result.penalties.away ? fixture.homeId : fixture.awayId))} win ${Math.max(count('home'), count('away'))}–${Math.min(count('home'), count('away'))} on penalties` : `Penalties ${count('home')}–${count('away')}`}${marks ? ` · ${marks}` : ''}${!done && last ? ` · ${esc(last.name)} ${last.scored ? 'scores' : 'misses'}` : ''}${!done && !last ? ' · the shoot-out is about to start' : ''}</p>`;
+    }
+    if (minute === Infinity) return result.extraTime ? '<p class="hint pens">After extra time</p>' : '';
+    if (!live?.cup) return '';
+    const end = fixtureEnd(live, fixture);
+    if (minute >= end) return `<p class="hint pens">${end > MatchView.END ? 'After extra time' : 'Full time'}</p>`;
+    return minute >= MatchView.END ? '<p class="hint pens">Extra time</p>' : '';
   }
   function liveHead(live) {
-    const watched = live.view === 'pitch' ? watchedFixture(live) : null, minute = Math.floor(watched ? fixtureClock(live, watched) : liveClock(live)), done = minute >= MatchView.END;
+    const watched = live.view === 'pitch' ? watchedFixture(live) : null, minute = Math.floor(watched ? fixtureClock(live, watched) : liveClock(live)), to = live.to ?? MatchView.END, done = minute >= (watched ? fixtureEnd(live, watched) : to), pens = pensShown(live) >= 0;
     const score = watched && (side => watched.result[side].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length);
-    return `<div class="row"><div><div class="eyebrow live-label">● Live · ${live.cup ? `FA Cup ${esc((room.league.cup?.rounds[live.cupRound]?.name || "").toLowerCase())}` : `Matchday ${live.round + 1}`}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${done ? 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${done ? 'Full time' : minute < 48 ? 'First half' : 'Second half'}</span></div><div class="live-clock"><span style="width:${minute / MatchView.END * 100}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit" style="background:${fixtureKits(watched).home}"></i>${esc(teamName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(teamName(watched.awayId))}<i class="kit" style="background:${fixtureKits(watched).away}"></i></span></div>` : ''}`;
+    return `<div class="row"><div><div class="eyebrow live-label">● Live · ${live.cup ? `FA Cup ${esc((room.league.cup?.rounds[live.cupRound]?.name || "").toLowerCase())}` : `Matchday ${live.round + 1}`}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${pens ? 'Penalties' : done ? minute > MatchView.END ? 'After extra time' : 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${pens ? 'Shoot-out' : done ? 'Full time' : minute <= 48 ? 'First half' : minute < MatchView.END ? 'Second half' : 'Extra time'}</span></div><div class="live-clock"><span style="width:${Math.min(100, minute / to * 100)}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit" style="background:${fixtureKits(watched).home}"></i>${esc(teamName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(teamName(watched.awayId))}<i class="kit" style="background:${fixtureKits(watched).away}"></i></span></div>` : ''}`;
   }
   function liveRest(live) {
     const minute = liveMinute(live), fixtures = liveFixtures(live);
-    if (live.view !== 'pitch') return fixtures.map(fixture => fixtureCard(fixture, minute)).join('');
+    if (live.view !== 'pitch') return fixtures.map(fixture => fixtureCard(fixture, Math.min(minute, fixtureEnd(live, fixture)), live)).join('');
     const watched = watchedFixture(live), now = fixtureClock(live, watched), teamOf = side => teamName(side === 'home' ? watched.homeId : watched.awayId);
     const ticker = timelineFor(live, watched).events.filter(event => event.abs <= now).slice(-5).reverse()
-      .map(event => `<li class="${event.goal ? 'goal-event' : ''}"><span class="goal-minute">${clockLabel(Math.min(MatchView.END, Math.round(event.abs)))}</span><span>${esc(event.text)}${event.assist ? ` · assist ${esc(event.assist)}` : ''}${event.side ? ` <small>${esc(teamOf(event.side))}</small>` : ''}</span></li>`).join('');
-    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(teamName(fixture.homeId))} v ${esc(teamName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, Math.floor(fixtureClock(live, fixture)))).join('')}`;
+      .map(event => `<li class="${event.goal ? 'goal-event' : ''}"><span class="goal-minute">${clockLabel(Math.min(live.to ?? MatchView.END, Math.round(event.abs)))}</span><span>${esc(event.text)}${event.assist ? ` · assist ${esc(event.assist)}` : ''}${event.side ? ` <small>${esc(teamOf(event.side))}</small>` : ''}</span></li>`).join('');
+    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(teamName(fixture.homeId))} v ${esc(teamName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, Math.floor(fixtureClock(live, fixture)), live)).join('')}`;
   }
   function liveInner(live) {
     return `<div id="live-head">${liveHead(live)}</div>${live.view === 'pitch' ? '<canvas id="match-canvas" class="match-canvas" role="img" aria-label="Live 2D match view"></canvas>' : ''}<div id="live-rest">${liveRest(live)}</div>`;
@@ -1933,6 +2044,9 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     const event = room.league.nextEvent, cupRound = league.cup && league.cup.round < league.cup.rounds.length ? league.cup.rounds[league.cup.round] : null;
     const latest = shown.round - 1, next = finished || live || event !== 'league' || room.window && room.window.stage !== 'done' ? null : shown.round, derbyNext = next !== null && shown.fixtures.some(fixture => fixture.round === next && isManager(fixture.homeId) && isManager(fixture.awayId));
     const cupNext = !live && event === 'cup' && cupRound ? `<div class="fixture-group"><div class="eyebrow">Next up · FA Cup ${esc(cupRound.name.toLowerCase())}</div>${cupRound.ties.filter(tie => !tie.bye && (!premier() || allFixtures || isManager(tie.homeId) || isManager(tie.awayId))).map(tie => fixtureCard(tie)).join('') || '<p class="hint">No managers in this round.</p>'}</div>` : '';
+    // A cup round played since the last league matchday is the latest football, so it leads the page.
+    const cupDone = !live && league.cup ? league.cup.rounds.map((round, index) => ({ round, index })).filter(({ round, index }) => index < league.cup.round && round.after === shown.round).at(-1) : null;
+    const cupLatest = cupDone ? `<div class="fixture-group"><div class="eyebrow">Latest results · FA Cup ${esc(cupDone.round.name.toLowerCase())}</div>${cupDone.round.ties.filter(tie => !tie.bye && (!premier() || allFixtures || isManager(tie.homeId) || isManager(tie.awayId))).map(tie => fixtureCard(tie)).join('') || '<p class="hint">No managers in this round.</p>'}${league.cup.winnerId && cupDone.index === league.cup.rounds.length - 1 ? `<p class="hint">🏆 ${esc(teamName(league.cup.winnerId))} win the FA Cup</p>` : ''}</div>` : '';
     const windowCard = !live && (event === 'window' || (room.window && room.window.stage !== 'done')) ? `<div class="fixture-group window-banner"><div class="eyebrow">January transfer window</div><p>${!room.window ? 'The season is at its halfway point. Two new players per manager are ready for auction, with no squad limit.' : room.window.stage === 'auction' ? 'The window auction is under way in the Auction tab.' : 'Place your new signings in your XI on the Teams screen, then the host resumes the season.'}</p></div>` : '';
     const controls = finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>'
       : room.league.pending ? ''
@@ -1943,7 +2057,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
       : `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>`;
     const history = latest > 0 ? `<details class="history"><summary>Previous results</summary>${Array.from({ length: latest }, (_, index) => latest - 1 - index).map(round => `<div class="hint gap-top">Matchday ${round + 1}</div>${games(round)}`).join('')}</details>` : '';
     const fixturesPanel = `<section class="panel stack"><div class="row"><h2>${finished ? 'Season complete' : 'Your fixtures'}</h2>${premier() ? `<button class="quiet" data-do="all-fixtures">${allFixtures ? 'Only manager games' : 'Every game'}</button>` : ''}</div>
-      ${latest >= 0 ? `<div class="fixture-group"><div class="eyebrow">Latest results · Matchday ${latest + 1}</div>${games(latest)}${restNote(latest)}</div>` : ''}
+      ${cupLatest}${latest >= 0 ? `<div class="fixture-group"><div class="eyebrow">${cupLatest ? 'Previous matchday' : 'Latest results'} · Matchday ${latest + 1}</div>${games(latest)}${restNote(latest)}</div>` : ''}
       ${cupNext}${windowCard}${next !== null ? `<div class="fixture-group"><div class="eyebrow">Next up · Matchday ${next + 1}${derbyNext ? ' · manager match, played live' : ''}</div>${games(next)}${restNote(next)}</div>` : ''}
       ${controls}${history}</section>`;
     const tablePanel = `<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Final table' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} ${isManager(rows[0].id) || !premier() ? 'are champions!' : 'win the league'}` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}</section>`;
@@ -1955,8 +2069,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     $('#sound-toggle').hidden = !room; $('#sound-toggle').textContent = sound.enabled ? 'Sound on' : 'Sound off'; $('#sound-toggle').setAttribute('aria-pressed', sound.enabled);
     $('#rating-toggle').hidden = !room?.game || !room.isHost; $('#rating-toggle').textContent = showRatings ? 'Hide ratings' : 'Show ratings';
     connection();
-    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen, cup: room.league?.cup ? cupScreen : leagueScreen, summary: room.finished ? summaryScreen : leagueScreen }[tab] || auctionScreen)();
-    if (room?.game && tab === 'auction') {
+    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionOpen() ? auctionScreen : leagueScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen, cup: room.league?.cup ? cupScreen : leagueScreen, summary: room.finished ? summaryScreen : leagueScreen }[tab] || auctionScreen)();
+    if (room?.game && tab === 'auction' && auctionOpen()) {
       $('.auction-layout').insertAdjacentHTML('afterend', skippedPlayers());
       if (room.round?.status === 'passed') $('.player-card .eyebrow').textContent = 'SKIPPED · QUEUED FOR LATER';
       if (room.round?.returning) {
@@ -1983,8 +2097,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     }
     if (!live) return;
     // Refresh the score, clock and commentary whenever the minute or the shown events change.
-    let minute = liveMinute(live);
-    if (live.view === 'pitch') { const watched = watchedFixture(live), now = fixtureClock(live, watched); minute = `${Math.floor(now)}:${timelineFor(live, watched).events.filter(event => event.abs <= now).length}:${watched.id}`; }
+    let minute = `${liveMinute(live)}:${pensShown(live)}`;
+    if (live.view === 'pitch') { const watched = watchedFixture(live), now = fixtureClock(live, watched); minute = `${Math.floor(now)}:${timelineFor(live, watched).events.filter(event => event.abs <= now).length}:${watched.id}:${pensShown(live)}`; }
     if (minute === shownMinute) return;
     shownMinute = minute;
     const goals = goalsNow(live); if (goals > liveGoals) { if (live.view === 'pitch') sound.roar(); else sound.goal(); } liveGoals = goals;
@@ -2006,6 +2120,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   document.addEventListener('pointerdown', () => sound.unlock(), true);
   $('#rating-toggle').addEventListener('click', () => action('ratings', { show: !showRatings }));
   $('#app').addEventListener('change', event => {
+    if (event.target.form?.id === 'rules-form') queueMicrotask(queueRules);
     if (event.target.name === 'subs') { const form = event.target.form; form?.querySelectorAll('#capacity option').forEach(option => { option.textContent = `${option.value} managers · ${option.value * (event.target.checked ? 16 : 11)} players`; }); }
     if (event.target.id === 'my-formation') action('formation', { formation: event.target.value });
     if (event.target.name === 'sub-off') selectedOff = event.target.value;
@@ -2013,7 +2128,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   });
   $('#app').addEventListener('input', event => {
     if (event.target.id === 'bid-value') bidText = event.target.value;
-    if (event.target.form?.id === 'rules-form') queueMicrotask(() => { const form = $('#rules-form'); if (!form) return; rulesDraft = readRules(form); form.querySelector('button.primary').disabled = matchesRoom(rulesDraft) || !connected || busy; });
+    if (event.target.form?.id === 'rules-form') queueMicrotask(queueRules);
     if (['season-from', 'season-to', 'rating-min', 'rating-max'].includes(event.target.id)) {
       const seasonInput = event.target.id.startsWith('season'), low = $(seasonInput ? '#season-from' : '#rating-min'), high = $(seasonInput ? '#season-to' : '#rating-max');
       if (+low.value > +high.value) (event.target === low ? high : low).value = event.target.value;
@@ -2022,7 +2137,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   });
   $('#app').addEventListener('submit', async event => {
     event.preventDefault(); const form = event.target;
-    if (form.id === 'rules-form') { const { capacity, ...config } = readRules(form); await action('settings', { capacity, config }); if (rulesDraft && matchesRoom(rulesDraft)) rulesDraft = null; render(); return; }
+    if (form.id === 'rules-form') { queueRules(); clearTimeout(rulesTimer); saveRules(); return; }
     if (form.id === 'bid-form') {
       const value = $('#bid-value').value, price = Number(value);
       if (value === '' || !Number.isInteger(price) || price < 0) return toast('Bids are whole millions, e.g. 12 for £12m.');
@@ -2073,6 +2188,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     if (type === 'squad-filter') { squadFilter = id; render(); return; }
     if (type === 'ht-slot' || type === 'ht-bench') {
       // Tap a player, then another: two on the pitch swap places; a pitch player and a substitute make a change.
+      if (busy || !connected) return;
       const first = halfSelected;
       if (!first || first.id === id) { halfSelected = first?.id === id ? null : { id, bench: type === 'ht-bench' }; render(); return; }
       halfSelected = null;
@@ -2085,7 +2201,6 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     if (type === 'ready-half') return action('readyHalf', { ready: !room.league.pending?.ready?.[room.me] });
     if (type === 'resume' && resumable) { const id = resumable.id; busy = true; render(); try { await api(`/api/room/${id}`); connect(); } catch (error) { toast(error.message); storage.set('room', null); resumable = null; } finally { busy = false; render(); } return; }
     if (type === 'forget') { storage.set('room', null); resumable = null; render(); return; }
-    if (type === 'discard-rules') { rulesDraft = null; render(); return; }
     if (type === 'watch') { watchFixture = id; shownMinute = -1; updateLive(); return; }
     if (type === 'matchView') return action('matchView', { view: id });
     if (type === 'rematch') {
@@ -2153,7 +2268,7 @@ body.dragging,body.dragging *{cursor:grabbing!important}
   }
   function leaveRoom() {
     clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); }
-    socket = null; room = null; connected = false; storage.set('room', null); rulesDraft = null; resumable = null;
+    socket = null; room = null; connected = false; storage.set('room', null); rulesDraft = null; rulesState = ''; clearTimeout(rulesTimer); resumable = null;
     try { sessionStorage.removeItem('touchline-online-tab-room'); } catch {} screen = 'home'; tab = 'auction'; liveKey = null; summaryPending = false;
     history.replaceState(null, '', '/');
   }

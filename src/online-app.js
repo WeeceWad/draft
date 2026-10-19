@@ -8,7 +8,7 @@
   const line = position => lines[position] || 'mid';
   const positions = list => `<span class="pos-list">${list.map(position => `<span class="pos pos-${line(position)}">${esc(position)}</span>`).join('')}</span>`;
   const storage = { get(key) { try { return localStorage.getItem(`touchline-online-${key}`); } catch { return null; } }, set(key, value) { try { value === null ? localStorage.removeItem(`touchline-online-${key}`) : localStorage.setItem(`touchline-online-${key}`, value); } catch {} } };
-  let squadFilter = 'all', halfSelected = null, selectedOff = null, selectedOn = null, allFixtures = false, resumable = null, rulesDraft = null, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
+  let squadFilter = 'all', halfSelected = null, selectedOff = null, selectedOn = null, allFixtures = false, resumable = null, rulesDraft = null, rulesTimer = null, rulesState = '', rulesSaving = false, room = null, socket = null, connected = false, busy = false, retry = 0, reconnectTimer = null, screen = 'home', tab = 'auction', teamId = null, selectedSlot = null, drag = null, suppressClick = false, liveKey = null, shownMinute = -1, liveGoals = 0, summaryPending = false, watchFixture = null, frame = null, timelines = new Map(), bidText = '', offset = 0, seasons = [], revealDrawn = null;
   let showRatings = true;
   let fullStats = false;
   const clock = () => Date.now() + offset;
@@ -130,8 +130,31 @@
   const matchesRoom = values => ruleKeys.every(key => values[key] === savedRules()[key]);
   function lobbyRules() {
     if (!room.isHost) return rules(room.config);
-    const values = rulesDraft || savedRules(), changed = !!rulesDraft && !matchesRoom(rulesDraft);
-    return `<form id="rules-form" class="stack rules-form"><div class="row"><h2>Room rules</h2>${changed ? '<span class="pill">Unsaved changes</span>' : ''}</div>${ruleFields(values, room.members.length)}<div class="actions"><button class="primary" ${disabled(!changed || !connected || busy)}>Save rules</button>${changed ? '<button type="button" class="quiet" data-do="discard-rules">Discard</button>' : ''}</div><p class="hint">£1bn each · 11 players each · bids from £1m · 60 seconds from the first bid, +10 per bid. Saving new rules asks everyone to ready up again.</p></form>`;
+    const values = rulesDraft || savedRules();
+    return `<form id="rules-form" class="stack rules-form"><div class="row"><h2>Room rules</h2><span id="rules-state" class="pill ${rulesState === 'saved' ? 'green' : ''}" ${rulesState ? '' : 'hidden'}>${rulesLabel()}</span></div>${ruleFields(values, room.members.length)}<p class="hint">£1bn each · 11 players each · bids from £1m · 60 seconds from the first bid, +10 per bid. Changes save automatically and everyone readies up again.</p></form>`;
+  }
+  const rulesLabel = () => ({ pending: 'Saving…', saving: 'Saving…', saved: 'Saved ✓', error: 'Not saved' }[rulesState] || '');
+  function showRulesState() { const pill = $('#rules-state'); if (!pill) return; pill.hidden = !rulesState; pill.textContent = rulesLabel(); pill.classList.toggle('green', rulesState === 'saved'); }
+  // Host rule changes save themselves shortly after the last edit, so what the lobby shows is always what the room plays.
+  function queueRules() {
+    const form = $('#rules-form'); if (!form) return;
+    rulesDraft = readRules(form); rulesState = 'pending'; showRulesState();
+    clearTimeout(rulesTimer); rulesTimer = setTimeout(saveRules, 450);
+  }
+  async function saveRules() {
+    if (!rulesDraft || !room || room.status !== 'lobby') { rulesDraft = null; return; }
+    if (rulesSaving) { clearTimeout(rulesTimer); rulesTimer = setTimeout(saveRules, 250); return; }
+    if (matchesRoom(rulesDraft)) { rulesDraft = null; rulesState = 'saved'; showRulesState(); return; }
+    const sent = rulesDraft, { capacity, ...config } = sent; rulesSaving = true; rulesState = 'saving'; showRulesState();
+    try {
+      await api('/api/action', { roomId: room.id, command: { type: 'settings', requestId: crypto.randomUUID(), capacity, config } });
+      rulesState = 'saved';
+    } catch (error) { toast(error.message); rulesState = 'error'; if (rulesDraft === sent) rulesDraft = null; }
+    finally {
+      rulesSaving = false;
+      if (rulesDraft === sent) { rulesDraft = null; render(); }
+      else showRulesState();
+    }
   }
   function setup() {
     return `<div class="settings stack"><div class="row"><div><div class="eyebrow">Before kick-off</div><h1 class="gap-top">Your auction rules</h1></div><button class="quiet" data-do="home">Back</button></div><form id="create-form" class="panel stack"><div class="field"><label for="host-name">Your manager name</label><input id="host-name" name="name" maxlength="24" required autocomplete="nickname" value="${esc(storage.get('name') || '')}" placeholder="e.g. Alex"></div>${ruleFields({ capacity: 2, competition: 'friends', formation: Object.keys(DraftCore.formations)[0], mode: 'peak', seasonFrom: seasons[0], seasonTo: seasons.at(-1), ratingMin: 40, ratingMax: 95 })}<p class="hint">The server selects a hidden, balanced pool with enough players for the chosen formation, including one goalkeeper per manager. These rules stay fixed for the game.</p><button class="primary" ${disabled(busy)}>Create room & get your code →</button></form></div>`;
@@ -147,7 +170,12 @@
     return `<div class="room-head row"><div><div class="eyebrow">The dressing room</div><h1 class="gap-top">Waiting for your managers</h1></div><span class="pill">${room.members.length}/${room.capacity} joined</span></div><div class="grid lobby-grid"><section class="panel stack"><h2>Share your room code</h2><div class="big-code">${room.code}</div><div class="actions"><button data-do="copy-code">Copy code</button><button data-do="share">Share invite</button></div><p class="hint">Open this game on another device and enter the code. The room lasts 24 hours.</p></section><section class="panel stack"><h2>Your managers</h2>${kitPicker()}<div>${room.members.map(member => `<div class="member"><div class="avatar" style="${member.kit ? `background:${DraftCore.KITS[member.kit].hex};color:${DraftCore.textOn(DraftCore.KITS[member.kit].hex)}` : ''}">${esc(member.name.slice(0, 1).toUpperCase())}</div><div class="grow"><strong>${esc(member.name)}${member.managerId === room.me ? ' (you)' : ''}</strong><small>${member.isHost ? 'Host · ' : ''}${member.ready ? 'Ready to draft' : 'Not ready yet'}</small></div>${room.isHost && member.managerId !== room.me ? `<button class="quiet danger" data-do="kick" data-id="${member.managerId}" aria-label="Remove ${esc(member.name)}">×</button>` : `<span class="pill ${member.ready ? 'green' : ''}">${member.ready ? 'Ready' : 'Waiting'}</span>`}</div>`).join('')}</div><button class="${me.ready ? 'quiet' : 'primary'}" data-do="ready" ${disabled(!connected || busy)}>${me.ready ? 'Not ready' : 'I’m ready'}</button>${room.isHost ? `<button class="primary" data-do="start" ${disabled(!allReady || !connected || busy)}>Start the auction →</button><p class="hint">Everyone must join and be ready before you start.</p>` : '<p class="hint">Your host starts once everyone is ready.</p>'}</section></div><section class="panel stack lobby-rules">${room.isHost ? lobbyRules() : `<h2>Room rules</h2>${rules(room.config)}`}</section>${roomFooter()}`;
   }
   function roomFooter() { return `<details class="gap-top"><summary class="hint">Room options</summary><div class="footer-actions"><button class="quiet" data-do="leave">Return to home</button>${room.isHost ? `<select id="next-host" aria-label="Choose next host">${room.members.filter(member => member.managerId !== room.me).map(member => `<option value="${member.managerId}">${esc(member.name)}</option>`).join('')}</select><button class="quiet" data-do="transferHost" ${disabled(!connected || busy || room.members.length < 2)}>Hand over host</button>` : ''}</div><p class="hint gap-top">Leaving this page keeps your place in the room. Closing the browser does not withdraw a live bid. Hand over hosting before the host leaves.</p></details>`; }
-  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${[['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League'], ...(room.league?.cup ? [['cup', '🏆 Cup']] : []), ...(room.finished ? [['summary', '★ Summary']] : [])].map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
+  // Once the season is under way the auction is history: its tab only returns for the January window's auction.
+  const auctionOpen = () => !room.league || room.status === 'draft';
+  const tabsFor = () => room.league
+    ? [...(room.status === 'draft' ? [['auction', '◎ January auction']] : []), ['league', '♜ League'], ['teams', '▣ Teams'], ...(room.league.cup ? [['cup', '🏆 Cup']] : []), ['transfers', '⇄ Transfers'], ...(room.finished ? [['summary', '★ Summary']] : [])]
+    : [['auction', '◎ Auction'], ['teams', '▣ Teams'], ['transfers', '⇄ Transfers'], ['league', '♜ League']];
+  function navigation() { return `<div class="room-head row"><div><div class="eyebrow">ROOM ${room.code} · ${room.game.sales.length}/${room.game.totalPlayers} drafted</div><h1 class="gap-top">${esc(memberName(room.me))}</h1></div><div><div class="hint">Your budget</div><div class="budget">${money(myBudget())}</div></div></div><nav class="tabs" aria-label="Game sections">${tabsFor().map(([id, label]) => `<button data-do="tab" data-id="${id}" class="${tab === id ? 'active' : ''}" aria-current="${tab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`; }
   function auctionScreen() {
     const round = room.round, player = round && entry(round.playerId), spinning = round?.status === 'open' && clock() < round.opensAt;
     const open = round?.status === 'open', out = round?.withdrawn.includes(room.me), leader = round?.leader;
@@ -194,9 +222,15 @@
   }
   function transfersScreen() { return `<section class="panel stack"><div class="row"><h2>Transfer board</h2><span class="pill">${room.game.sales.length} signings</span></div><p>Every deal, ordered from the biggest fee to the smallest.</p><div>${room.game.sales.slice().sort((a, b) => b.price - a.price).map((sale, i) => { const player = entry(sale.playerId); return `<div class="sale-row"><span class="muted">${i + 1}</span><div style="flex:1"><strong>${esc(player.player.name)} ${showRatings ? `<span class="rating">${rating(player)}</span>` : ''}</strong><small>${positions(player.player.positions)} ${esc(memberName(sale.managerId))} · ${esc(player.season.season)}</small></div><span class="price">${money(sale.price)}</span><button class="quiet" data-do="team" data-id="${sale.managerId}" aria-label="View ${esc(memberName(sale.managerId))}’s team">XI</button></div>`; }).join('') || '<div class="empty">No deals yet. The auction is where it all starts.</div>'}</div></section>`; }
   const liveNow = () => room?.live && clock() < room.live.endsAt ? room.live : null;
-  const liveClock = live => { const from = live.from ?? 0, to = live.to ?? MatchView.END; return Math.max(from, Math.min(to, from + (clock() - live.startsAt) / (live.endsAt - live.startsAt) * (to - from))); };
+  // A cup matchday can run on into extra time (clock 97–127) and then a shoot-out, revealed one kick at a time.
+  const PEN_INTRO_MS = 2500, PEN_KICK_MS = 1400;
+  const liveSpan = live => live.endsAt - live.startsAt - (live.pensMs || 0);
+  const liveClock = live => { const from = live.from ?? 0, to = live.to ?? MatchView.END; return Math.max(from, Math.min(to, from + (clock() - live.startsAt) / liveSpan(live) * (to - from))); };
+  const pensShown = live => { if (!live?.pensMs) return -1; const elapsed = clock() - live.startsAt - liveSpan(live); return elapsed < 0 ? -1 : Math.max(0, Math.floor((elapsed - PEN_INTRO_MS) / PEN_KICK_MS) + 1); };
+  // Where a fixture's own clock stops: 97 unless it is a level cup tie that goes to extra time.
+  const fixtureEnd = (live, fixture) => Math.min(live.to ?? MatchView.END, fixture.result?.extraTime ? 127 : MatchView.END);
   const liveMinute = live => Math.floor(liveClock(live));
-  const clockLabel = value => value <= 45 ? `${value}′` : value <= 48 ? `45+${value - 45}′` : value <= 93 ? `${value - 3}′` : `90+${value - 93}′`;
+  const clockLabel = value => value <= 45 ? `${value}′` : value <= 48 ? `45+${value - 45}′` : value <= 93 ? `${value - 3}′` : value <= 97 ? `90+${value - 93}′` : `${Math.min(120, value - 7)}′`;
   const pitchColours = { home: '#6cb4ff', homeKeeper: '#ffd84d', away: '#ff7b7b', awayKeeper: '#c792ff' };
   function watchedFixture(live) {
     const fixtures = liveFixtures(live);
@@ -206,35 +240,54 @@
     const key = `${room.id}:${live.startsAt}:${fixture.id}:${live.from ?? 0}`;
     if (!timelines.has(key)) {
       if (timelines.size > 20) timelines.clear();
-      const team = id => room.league.teams.find(team => team.id === id), index = liveFixtures(live).indexOf(fixture);
-      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId), away: team(fixture.awayId), seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0, duration: (live.endsAt - live.startsAt) / 1000, from: live.from ?? 0, to: live.to ?? MatchView.END }));
+      const index = liveFixtures(live).indexOf(fixture), second = (live.from ?? 0) >= 48;
+      const team = (id, side) => { const snapshot = room.league.teams.find(team => team.id === id), made = fixture.result.subs?.[side]; return second && made?.length && snapshot ? { ...snapshot, squad: LeagueCore.lineupAfter(snapshot, made) } : snapshot; };
+      const from = live.from ?? 0, to = fixtureEnd(live, fixture), share = (to - from) / ((live.to ?? MatchView.END) - from);
+      timelines.set(key, MatchView.build({ result: fixture.result, home: team(fixture.homeId, 'home'), away: team(fixture.awayId, 'away'), seed: (live.startsAt ^ Math.imul(index + 1, 2654435761)) >>> 0, duration: liveSpan(live) * share / 1000, from, to }));
     }
     return timelines.get(key);
   }
-  const liveFixtures = live => live.cup ? (room.league.cup?.rounds[live.cupRound]?.ties || []).filter(tie => !tie.bye && tie.result && isManager(tie.homeId) && isManager(tie.awayId)) : room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))))
+  const liveFixtures = live => live.cup ? (room.league.cup?.rounds[live.cupRound]?.ties || []).filter(tie => !tie.bye && tie.result && (isManager(tie.homeId) || isManager(tie.awayId))) : room.league.fixtures.filter(fixture => fixture.round === live.round && (!premier() || (isManager(fixture.homeId) && isManager(fixture.awayId))))
     .map(fixture => fixture.result ? fixture : { ...fixture, result: room.league.pending?.firstHalf?.[fixture.id] }).filter(fixture => fixture.result);
   const realSeconds = live => Math.max(0, (clock() - live.startsAt) / 1000);
-  const fixtureClock = (live, fixture) => live.view === 'pitch' ? MatchView.clockAt(timelineFor(live, fixture), realSeconds(live)) : liveClock(live);
+  const fixtureClock = (live, fixture) => live.view === 'pitch' ? MatchView.clockAt(timelineFor(live, fixture), realSeconds(live)) : Math.min(fixtureEnd(live, fixture), liveClock(live));
   const goalsNow = live => liveFixtures(live).reduce((sum, fixture) => { const minute = fixtureClock(live, fixture); return sum + [...fixture.result.homeScorers, ...fixture.result.awayScorers].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length; }, 0);
   // Scorers sit under their own team, one per line, with the minute beside them.
-  function fixtureCard(fixture, minute = Infinity) {
+  function fixtureCard(fixture, minute = Infinity, live = null) {
     const result = fixture.result, upTo = goals => (goals || []).filter(goal => LeagueCore.absoluteMinute(goal) <= minute);
     const home = upTo(result?.homeScorers), away = upTo(result?.awayScorers);
     const list = goals => goals.map(goal => `<li><span class="goal-name">${esc(goal.name)}</span><span class="goal-minute">${LeagueCore.minuteLabel(goal)}</span>${goal.assistName ? `<span class="goal-assist">Assist: ${esc(goal.assistName)}</span>` : ''}</li>`).join('');
-    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${kitDot(fixture.homeId)}${esc(teamName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(teamName(fixture.awayId))}${kitDot(fixture.awayId)}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}${minute === Infinity && result?.penalties ? `<p class="hint pens">Penalties ${result.penalties.home}–${result.penalties.away} · ${result.penalties.kicks.map(kick => `${kick.side === 'home' ? '◀' : '▶'}${kick.scored ? '✓' : '✗'}`).join(' ')}</p>` : minute === Infinity && result?.extraTime ? '<p class="hint pens">After extra time</p>' : ''}</div>`;
+    const changes = side => minute >= 48 ? (result?.subs?.[side] || []).filter(change => change.on).map(change => { const snapshot = room.league.teams.find(team => team.id === fixture[side + 'Id']); return `<li class="sub-change"><span class="on">▲ ${esc(onPitchName(snapshot, change.on))}</span><span class="off">▼ ${esc(onPitchName(snapshot, change.off))}</span></li>`; }).join('') : '';
+    const subsList = changes('home') || changes('away') ? `<div class="goal-columns subs-columns"><ul class="goals">${changes('home')}</ul><ul class="goals away">${changes('away')}</ul></div>` : '';
+    return `<div class="fixture"><div class="fixture-line"><span class="team-name">${kitDot(fixture.homeId)}${esc(teamName(fixture.homeId))}</span><span class="score">${result ? `${home.length} – ${away.length}` : 'vs'}</span><span class="team-name away">${esc(teamName(fixture.awayId))}${kitDot(fixture.awayId)}</span></div>${home.length || away.length ? `<div class="goal-columns"><ul class="goals">${list(home)}</ul><ul class="goals away">${list(away)}</ul></div>` : ''}${subsList}${cardNote(fixture, minute, live)}</div>`;
+  }
+  function cardNote(fixture, minute, live) {
+    const result = fixture.result; if (!result) return '';
+    const shown = minute === Infinity ? Infinity : pensShown(live);
+    if (result.penalties && shown >= 0) {
+      const kicks = result.penalties.kicks.slice(0, shown), count = side => kicks.filter(kick => kick.side === side && kick.scored).length, last = kicks.at(-1);
+      const marks = kicks.map(kick => `${kick.side === 'home' ? '◀' : '▶'}${kick.scored ? '✓' : '✗'}`).join(' ');
+      const done = shown >= result.penalties.kicks.length;
+      return `<p class="hint pens">${done ? `${esc(teamName(result.penalties.home > result.penalties.away ? fixture.homeId : fixture.awayId))} win ${Math.max(count('home'), count('away'))}–${Math.min(count('home'), count('away'))} on penalties` : `Penalties ${count('home')}–${count('away')}`}${marks ? ` · ${marks}` : ''}${!done && last ? ` · ${esc(last.name)} ${last.scored ? 'scores' : 'misses'}` : ''}${!done && !last ? ' · the shoot-out is about to start' : ''}</p>`;
+    }
+    if (minute === Infinity) return result.extraTime ? '<p class="hint pens">After extra time</p>' : '';
+    if (!live?.cup) return '';
+    const end = fixtureEnd(live, fixture);
+    if (minute >= end) return `<p class="hint pens">${end > MatchView.END ? 'After extra time' : 'Full time'}</p>`;
+    return minute >= MatchView.END ? '<p class="hint pens">Extra time</p>' : '';
   }
   function liveHead(live) {
-    const watched = live.view === 'pitch' ? watchedFixture(live) : null, minute = Math.floor(watched ? fixtureClock(live, watched) : liveClock(live)), done = minute >= MatchView.END;
+    const watched = live.view === 'pitch' ? watchedFixture(live) : null, minute = Math.floor(watched ? fixtureClock(live, watched) : liveClock(live)), to = live.to ?? MatchView.END, done = minute >= (watched ? fixtureEnd(live, watched) : to), pens = pensShown(live) >= 0;
     const score = watched && (side => watched.result[side].filter(goal => LeagueCore.absoluteMinute(goal) <= minute).length);
-    return `<div class="row"><div><div class="eyebrow live-label">● Live · ${live.cup ? `FA Cup ${esc((room.league.cup?.rounds[live.cupRound]?.name || "").toLowerCase())}` : `Matchday ${live.round + 1}`}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${done ? 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${done ? 'Full time' : minute < 48 ? 'First half' : 'Second half'}</span></div><div class="live-clock"><span style="width:${minute / MatchView.END * 100}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit" style="background:${fixtureKits(watched).home}"></i>${esc(teamName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(teamName(watched.awayId))}<i class="kit" style="background:${fixtureKits(watched).away}"></i></span></div>` : ''}`;
+    return `<div class="row"><div><div class="eyebrow live-label">● Live · ${live.cup ? `FA Cup ${esc((room.league.cup?.rounds[live.cupRound]?.name || "").toLowerCase())}` : `Matchday ${live.round + 1}`}${live.view === 'pitch' ? ' · Pitch view beta' : ''}</div><h2 class="gap-top live-minute">${pens ? 'Penalties' : done ? minute > MatchView.END ? 'After extra time' : 'Full time' : clockLabel(minute)}</h2></div><span class="pill">${pens ? 'Shoot-out' : done ? 'Full time' : minute <= 48 ? 'First half' : minute < MatchView.END ? 'Second half' : 'Extra time'}</span></div><div class="live-clock"><span style="width:${Math.min(100, minute / to * 100)}%"></span></div>${watched ? `<div class="pitch-scoreboard"><span class="team-name"><i class="kit" style="background:${fixtureKits(watched).home}"></i>${esc(teamName(watched.homeId))}</span><strong class="score">${score('homeScorers')} – ${score('awayScorers')}</strong><span class="team-name away">${esc(teamName(watched.awayId))}<i class="kit" style="background:${fixtureKits(watched).away}"></i></span></div>` : ''}`;
   }
   function liveRest(live) {
     const minute = liveMinute(live), fixtures = liveFixtures(live);
-    if (live.view !== 'pitch') return fixtures.map(fixture => fixtureCard(fixture, minute)).join('');
+    if (live.view !== 'pitch') return fixtures.map(fixture => fixtureCard(fixture, Math.min(minute, fixtureEnd(live, fixture)), live)).join('');
     const watched = watchedFixture(live), now = fixtureClock(live, watched), teamOf = side => teamName(side === 'home' ? watched.homeId : watched.awayId);
     const ticker = timelineFor(live, watched).events.filter(event => event.abs <= now).slice(-5).reverse()
-      .map(event => `<li class="${event.goal ? 'goal-event' : ''}"><span class="goal-minute">${clockLabel(Math.min(MatchView.END, Math.round(event.abs)))}</span><span>${esc(event.text)}${event.assist ? ` · assist ${esc(event.assist)}` : ''}${event.side ? ` <small>${esc(teamOf(event.side))}</small>` : ''}</span></li>`).join('');
-    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(teamName(fixture.homeId))} v ${esc(teamName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, Math.floor(fixtureClock(live, fixture)))).join('')}`;
+      .map(event => `<li class="${event.goal ? 'goal-event' : ''}"><span class="goal-minute">${clockLabel(Math.min(live.to ?? MatchView.END, Math.round(event.abs)))}</span><span>${esc(event.text)}${event.assist ? ` · assist ${esc(event.assist)}` : ''}${event.side ? ` <small>${esc(teamOf(event.side))}</small>` : ''}</span></li>`).join('');
+    return `<ul class="ticker">${ticker || '<li><span>Waiting for kick-off</span></li>'}</ul>${fixtures.length > 1 ? `<div class="watch-picker">${fixtures.map(fixture => `<button data-do="watch" data-id="${esc(fixture.id)}" class="${fixture.id === watched.id ? 'selected' : ''}">Watch ${esc(teamName(fixture.homeId))} v ${esc(teamName(fixture.awayId))}</button>`).join('')}</div>` : ''}${fixtures.map(fixture => fixtureCard(fixture, Math.floor(fixtureClock(live, fixture)), live)).join('')}`;
   }
   function liveInner(live) {
     return `<div id="live-head">${liveHead(live)}</div>${live.view === 'pitch' ? '<canvas id="match-canvas" class="match-canvas" role="img" aria-label="Live 2D match view"></canvas>' : ''}<div id="live-rest">${liveRest(live)}</div>`;
@@ -342,6 +395,9 @@
     const event = room.league.nextEvent, cupRound = league.cup && league.cup.round < league.cup.rounds.length ? league.cup.rounds[league.cup.round] : null;
     const latest = shown.round - 1, next = finished || live || event !== 'league' || room.window && room.window.stage !== 'done' ? null : shown.round, derbyNext = next !== null && shown.fixtures.some(fixture => fixture.round === next && isManager(fixture.homeId) && isManager(fixture.awayId));
     const cupNext = !live && event === 'cup' && cupRound ? `<div class="fixture-group"><div class="eyebrow">Next up · FA Cup ${esc(cupRound.name.toLowerCase())}</div>${cupRound.ties.filter(tie => !tie.bye && (!premier() || allFixtures || isManager(tie.homeId) || isManager(tie.awayId))).map(tie => fixtureCard(tie)).join('') || '<p class="hint">No managers in this round.</p>'}</div>` : '';
+    // A cup round played since the last league matchday is the latest football, so it leads the page.
+    const cupDone = !live && league.cup ? league.cup.rounds.map((round, index) => ({ round, index })).filter(({ round, index }) => index < league.cup.round && round.after === shown.round).at(-1) : null;
+    const cupLatest = cupDone ? `<div class="fixture-group"><div class="eyebrow">Latest results · FA Cup ${esc(cupDone.round.name.toLowerCase())}</div>${cupDone.round.ties.filter(tie => !tie.bye && (!premier() || allFixtures || isManager(tie.homeId) || isManager(tie.awayId))).map(tie => fixtureCard(tie)).join('') || '<p class="hint">No managers in this round.</p>'}${league.cup.winnerId && cupDone.index === league.cup.rounds.length - 1 ? `<p class="hint">🏆 ${esc(teamName(league.cup.winnerId))} win the FA Cup</p>` : ''}</div>` : '';
     const windowCard = !live && (event === 'window' || (room.window && room.window.stage !== 'done')) ? `<div class="fixture-group window-banner"><div class="eyebrow">January transfer window</div><p>${!room.window ? 'The season is at its halfway point. Two new players per manager are ready for auction, with no squad limit.' : room.window.stage === 'auction' ? 'The window auction is under way in the Auction tab.' : 'Place your new signings in your XI on the Teams screen, then the host resumes the season.'}</p></div>` : '';
     const controls = finished ? '<button class="primary" data-do="tab" data-id="summary">See the season summary →</button>'
       : room.league.pending ? ''
@@ -352,7 +408,7 @@
       : `${matchViewControl()}<p class="hint">Your host kicks off each matchday. Everyone watches it live.</p>`;
     const history = latest > 0 ? `<details class="history"><summary>Previous results</summary>${Array.from({ length: latest }, (_, index) => latest - 1 - index).map(round => `<div class="hint gap-top">Matchday ${round + 1}</div>${games(round)}`).join('')}</details>` : '';
     const fixturesPanel = `<section class="panel stack"><div class="row"><h2>${finished ? 'Season complete' : 'Your fixtures'}</h2>${premier() ? `<button class="quiet" data-do="all-fixtures">${allFixtures ? 'Only manager games' : 'Every game'}</button>` : ''}</div>
-      ${latest >= 0 ? `<div class="fixture-group"><div class="eyebrow">Latest results · Matchday ${latest + 1}</div>${games(latest)}${restNote(latest)}</div>` : ''}
+      ${cupLatest}${latest >= 0 ? `<div class="fixture-group"><div class="eyebrow">${cupLatest ? 'Previous matchday' : 'Latest results'} · Matchday ${latest + 1}</div>${games(latest)}${restNote(latest)}</div>` : ''}
       ${cupNext}${windowCard}${next !== null ? `<div class="fixture-group"><div class="eyebrow">Next up · Matchday ${next + 1}${derbyNext ? ' · manager match, played live' : ''}</div>${games(next)}${restNote(next)}</div>` : ''}
       ${controls}${history}</section>`;
     const tablePanel = `<section class="panel stack"><div class="row"><div><div class="eyebrow">${finished ? 'Final table' : `Matchday ${shown.round}/${count}`}</div><h2 class="gap-top">${finished ? `${esc(rows[0].name)} ${isManager(rows[0].id) || !premier() ? 'are champions!' : 'win the league'}` : 'The league table'}</h2></div><span class="pill">Home & away · 3 points for a win</span></div>${standings(rows)}</section>`;
@@ -364,8 +420,8 @@
     $('#sound-toggle').hidden = !room; $('#sound-toggle').textContent = sound.enabled ? 'Sound on' : 'Sound off'; $('#sound-toggle').setAttribute('aria-pressed', sound.enabled);
     $('#rating-toggle').hidden = !room?.game || !room.isHost; $('#rating-toggle').textContent = showRatings ? 'Hide ratings' : 'Show ratings';
     connection();
-    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen, cup: room.league?.cup ? cupScreen : leagueScreen, summary: room.finished ? summaryScreen : leagueScreen }[tab] || auctionScreen)();
-    if (room?.game && tab === 'auction') {
+    $('#app').innerHTML = !room ? screen === 'setup' ? setup() : home() : room.status === 'lobby' ? lobby() : navigation() + ({ auction: auctionOpen() ? auctionScreen : leagueScreen, teams: teamsScreen, transfers: transfersScreen, league: leagueScreen, cup: room.league?.cup ? cupScreen : leagueScreen, summary: room.finished ? summaryScreen : leagueScreen }[tab] || auctionScreen)();
+    if (room?.game && tab === 'auction' && auctionOpen()) {
       $('.auction-layout').insertAdjacentHTML('afterend', skippedPlayers());
       if (room.round?.status === 'passed') $('.player-card .eyebrow').textContent = 'SKIPPED · QUEUED FOR LATER';
       if (room.round?.returning) {
@@ -392,8 +448,8 @@
     }
     if (!live) return;
     // Refresh the score, clock and commentary whenever the minute or the shown events change.
-    let minute = liveMinute(live);
-    if (live.view === 'pitch') { const watched = watchedFixture(live), now = fixtureClock(live, watched); minute = `${Math.floor(now)}:${timelineFor(live, watched).events.filter(event => event.abs <= now).length}:${watched.id}`; }
+    let minute = `${liveMinute(live)}:${pensShown(live)}`;
+    if (live.view === 'pitch') { const watched = watchedFixture(live), now = fixtureClock(live, watched); minute = `${Math.floor(now)}:${timelineFor(live, watched).events.filter(event => event.abs <= now).length}:${watched.id}:${pensShown(live)}`; }
     if (minute === shownMinute) return;
     shownMinute = minute;
     const goals = goalsNow(live); if (goals > liveGoals) { if (live.view === 'pitch') sound.roar(); else sound.goal(); } liveGoals = goals;
@@ -415,6 +471,7 @@
   document.addEventListener('pointerdown', () => sound.unlock(), true);
   $('#rating-toggle').addEventListener('click', () => action('ratings', { show: !showRatings }));
   $('#app').addEventListener('change', event => {
+    if (event.target.form?.id === 'rules-form') queueMicrotask(queueRules);
     if (event.target.name === 'subs') { const form = event.target.form; form?.querySelectorAll('#capacity option').forEach(option => { option.textContent = `${option.value} managers · ${option.value * (event.target.checked ? 16 : 11)} players`; }); }
     if (event.target.id === 'my-formation') action('formation', { formation: event.target.value });
     if (event.target.name === 'sub-off') selectedOff = event.target.value;
@@ -422,7 +479,7 @@
   });
   $('#app').addEventListener('input', event => {
     if (event.target.id === 'bid-value') bidText = event.target.value;
-    if (event.target.form?.id === 'rules-form') queueMicrotask(() => { const form = $('#rules-form'); if (!form) return; rulesDraft = readRules(form); form.querySelector('button.primary').disabled = matchesRoom(rulesDraft) || !connected || busy; });
+    if (event.target.form?.id === 'rules-form') queueMicrotask(queueRules);
     if (['season-from', 'season-to', 'rating-min', 'rating-max'].includes(event.target.id)) {
       const seasonInput = event.target.id.startsWith('season'), low = $(seasonInput ? '#season-from' : '#rating-min'), high = $(seasonInput ? '#season-to' : '#rating-max');
       if (+low.value > +high.value) (event.target === low ? high : low).value = event.target.value;
@@ -431,7 +488,7 @@
   });
   $('#app').addEventListener('submit', async event => {
     event.preventDefault(); const form = event.target;
-    if (form.id === 'rules-form') { const { capacity, ...config } = readRules(form); await action('settings', { capacity, config }); if (rulesDraft && matchesRoom(rulesDraft)) rulesDraft = null; render(); return; }
+    if (form.id === 'rules-form') { queueRules(); clearTimeout(rulesTimer); saveRules(); return; }
     if (form.id === 'bid-form') {
       const value = $('#bid-value').value, price = Number(value);
       if (value === '' || !Number.isInteger(price) || price < 0) return toast('Bids are whole millions, e.g. 12 for £12m.');
@@ -482,6 +539,7 @@
     if (type === 'squad-filter') { squadFilter = id; render(); return; }
     if (type === 'ht-slot' || type === 'ht-bench') {
       // Tap a player, then another: two on the pitch swap places; a pitch player and a substitute make a change.
+      if (busy || !connected) return;
       const first = halfSelected;
       if (!first || first.id === id) { halfSelected = first?.id === id ? null : { id, bench: type === 'ht-bench' }; render(); return; }
       halfSelected = null;
@@ -494,7 +552,6 @@
     if (type === 'ready-half') return action('readyHalf', { ready: !room.league.pending?.ready?.[room.me] });
     if (type === 'resume' && resumable) { const id = resumable.id; busy = true; render(); try { await api(`/api/room/${id}`); connect(); } catch (error) { toast(error.message); storage.set('room', null); resumable = null; } finally { busy = false; render(); } return; }
     if (type === 'forget') { storage.set('room', null); resumable = null; render(); return; }
-    if (type === 'discard-rules') { rulesDraft = null; render(); return; }
     if (type === 'watch') { watchFixture = id; shownMinute = -1; updateLive(); return; }
     if (type === 'matchView') return action('matchView', { view: id });
     if (type === 'rematch') {
@@ -562,7 +619,7 @@
   }
   function leaveRoom() {
     clearTimeout(reconnectTimer); if (socket) { socket.onclose = null; socket.close(); }
-    socket = null; room = null; connected = false; storage.set('room', null); rulesDraft = null; resumable = null;
+    socket = null; room = null; connected = false; storage.set('room', null); rulesDraft = null; rulesState = ''; clearTimeout(rulesTimer); resumable = null;
     try { sessionStorage.removeItem('touchline-online-tab-room'); } catch {} screen = 'home'; tab = 'auction'; liveKey = null; summaryPending = false;
     history.replaceState(null, '', '/');
   }

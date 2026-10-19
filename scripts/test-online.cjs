@@ -200,6 +200,16 @@ const finishSeason = (state, uid = 'a') => { for (let guard = 0; guard < 400 && 
   assert(bracket.rounds[0].after < bracket.rounds[1].after && bracket.rounds[1].after <= league.roundCount(cup.league));
   for (let round = 0; round < bracket.rounds[0].after; round++) { cup = command(cup, 'a', 'playRound'); if (cup.live) time = cup.live.endsAt; }
   assert.equal(league.nextEvent(cup.league), 'cup', 'The cup round comes when its matchday is reached');
+  // Cup ties play live, on into extra time and a kick-by-kick shoot-out when they need them.
+  const cupRound = cup.league.cup.round, started = time;
+  cup = command(cup, 'a', 'playRound');
+  const liveTies = cup.league.cup.rounds[cupRound].ties.filter(tie => league.managerTie(cup.league, tie));
+  assert(cup.live?.cup && liveTies.length, 'Cup ties with managers in them are live');
+  const extraTime = liveTies.some(tie => tie.result.extraTime), kicks = Math.max(0, ...liveTies.map(tie => tie.result.penalties?.kicks.length || 0));
+  assert.equal(cup.live.to, extraTime ? 127 : 97);
+  assert.equal(cup.live.pensMs || 0, kicks ? 2500 + kicks * 1400 : 0);
+  assert.equal(cup.live.endsAt - started, Math.round(18000 * cup.live.to / 97) + (cup.live.pensMs || 0));
+  time = cup.live.endsAt;
   cup = finishSeason(cup);
   assert(cup.league.cup.winnerId && cup.league.cup.round === 2, 'The cup is played to a winner');
   for (const tie of cup.league.cup.rounds.flatMap(round => round.ties).filter(item => !item.bye)) {

@@ -92,6 +92,8 @@ function join(room, uid, displayName, now) {
 }
 // A live matchday plays the full match clock in 18 seconds, or 2½ minutes of highlights in the beta pitch view.
 const LIVE_MS = { classic: 18000, pitch: 150000 };
+// A live shoot-out: a pause after extra time, then one kick at a time.
+const PEN_INTRO_MS = 2500, PEN_KICK_MS = 1400;
 const isKeeper = (room, playerId) => !!room.game.pool.find(entry => entry.id === playerId)?.player.positions.includes('GK');
 const keeperCount = (room, managerId) => auction.purchases(room.game, managerId).filter(sale => isKeeper(room, sale.playerId)).length;
 const hasKeeper = (room, managerId) => keeperCount(room, managerId) > 0;
@@ -303,8 +305,13 @@ function apply(room, uid, command, now) {
       // Only games between managers play live; the rest are instant.
       const derby = leagueCore.eventHasDerby(room.league), view = room.matchView === 'pitch' ? 'pitch' : 'classic';
       if (event === 'cup') {
-        room.live = derby ? { cup: true, cupRound: room.league.cup.round, round: room.league.round, startsAt: now, endsAt: now + LIVE_MS[view], view, from: 0, to: 97 } : null;
+        // Ties with a manager in them play live: through extra time when one is level, then any shoot-out kick by kick.
+        const cupRound = room.league.cup.round;
         room.league = leagueCore.playCupRound(room.league).league;
+        const ties = room.league.cup.rounds[cupRound].ties.filter(tie => leagueCore.managerTie(room.league, tie));
+        const to = ties.some(tie => tie.result.extraTime) ? 127 : 97, kicks = Math.max(0, ...ties.map(tie => tie.result.penalties?.kicks.length || 0));
+        const pensMs = kicks ? PEN_INTRO_MS + kicks * PEN_KICK_MS : 0;
+        room.live = derby ? { cup: true, cupRound, round: room.league.round, startsAt: now, endsAt: now + Math.round(LIVE_MS[view] * to / 97) + pensMs, view, from: 0, to, ...(pensMs ? { pensMs } : {}) } : null;
         break;
       }
       if (command.type === 'playRound' && derby && room.league.subs) {

@@ -152,7 +152,8 @@
   }
   const goalOrder = (a, b) => a.minute - b.minute || (a.stoppage ?? 0) - (b.stoppage ?? 0);
   // Match clock from 0 to 97: 45+3 is 48 and 90+4 is 97.
-  const absoluteMinute = goal => goal.minute === 45 && goal.stoppage ? 45 + goal.stoppage : goal.minute === 90 && goal.stoppage ? 93 + goal.stoppage : goal.minute <= 45 ? goal.minute : goal.minute + 3;
+  // The match clock: 0–48 first half (with stoppage), 49–97 second half, then 98–127 for extra time (91'–120').
+  const absoluteMinute = goal => goal.extra ? 97 + goal.minute - 90 : goal.minute === 45 && goal.stoppage ? 45 + goal.stoppage : goal.minute === 90 && goal.stoppage ? 93 + goal.stoppage : goal.minute <= 45 ? goal.minute : goal.minute + 3;
   const fromAbsolute = value => value <= 45 ? { minute: value } : value <= 48 ? { minute: 45, stoppage: value - 45 } : value <= 93 ? { minute: value - 3 } : { minute: 90, stoppage: value - 93 };
   const minuteLabel = goal => goal.stoppage ? `${goal.minute}+${goal.stoppage}′` : `${goal.minute}′`;
   // As in 38-0, no two goals in a match share a minute: clashes move later, within the final whistle.
@@ -416,7 +417,7 @@
   }
   const eventHasDerby = league => {
     const event = nextEvent(league);
-    if (event === 'cup') return cupTies(league).some(tie => !tie.bye && managerDerby(league, tie));
+    if (event === 'cup') return cupTies(league).some(tie => managerTie(league, tie));
     if (event === 'league') return league.fixtures.some(fixture => fixture.round === league.round && managerDerby(league, fixture));
     return false;
   };
@@ -494,6 +495,7 @@
     for (const fixture of league.fixtures) if (byId.get(fixture.homeId).club && byId.get(fixture.awayId).club) planned[fixture.id] = simulateMatch(byId.get(fixture.homeId), byId.get(fixture.awayId), hash(league.seed, fixture.id), tallies);
     return planned;
   }
+  const managerTie = (league, tie) => !tie.bye && [tie.homeId, tie.awayId].some(id => isManagerTeam(league.teams.find(item => item.id === id)));
   const managerDerby = (league, fixture) => { const home = league.teams.find(item => item.id === fixture.homeId), away = league.teams.find(item => item.id === fixture.awayId); return isManagerTeam(home) && isManagerTeam(away); };
   const nextDerbyRound = league => { const fixture = league.fixtures.find(item => item.round >= league.round && managerDerby(league, item)); return fixture ? fixture.round : null; };
   const roundCount = league => Math.max(...league.fixtures.map(fixture => fixture.round)) + 1;
@@ -566,6 +568,6 @@
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, formTable, formOf, formed, FORM_NEUTRAL, FORM_EFFECT, drawCup, playCupRound, cupTies, nextEvent, eventHasDerby, advance, applyWindow, shootout, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, formTable, formOf, formed, FORM_NEUTRAL, FORM_EFFECT, drawCup, playCupRound, cupTies, nextEvent, eventHasDerby, advance, applyWindow, shootout, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, managerTie, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);

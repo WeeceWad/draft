@@ -6,7 +6,7 @@
   // simulates exactly the same match from the same seed.
   const draft = typeof module !== 'undefined' ? require('./draft-core.js') : scope.DraftCore;
   const leagueCore = typeof module !== 'undefined' ? require('./league-core.js') : scope.LeagueCore;
-  const LENGTH = 105, WIDTH = 68, DT = .1, PLAYBACK = 1.5, END = 97, SECOND = 48.6, POST = 3.66, MARGIN = 4;
+  const LENGTH = 105, WIDTH = 68, DT = .1, PLAYBACK = 1.5, END = 97, SECOND = 48.6, EXTRA = 97, EXTRA_SECOND = 112.5, EXTRA_END = 127, POST = 3.66, MARGIN = 4;
   const WIDE = new Set(['LW', 'RW', 'LM', 'RM', 'LB', 'RB', 'LWB', 'RWB']);
   const ATTACKING = { ST: 6, LW: 4, RW: 4, CAM: 4, LM: 2, RM: 2, CM: 2, CDM: 1, LWB: 1, RWB: 1, LB: .5, RB: .5, CB: .5 };
   const clamp = (value, low, high) => value < low ? low : value > high ? high : value;
@@ -15,7 +15,7 @@
   const surname = name => String(name || '').split(' ').at(-1);
   const round = value => Math.round(value * 100) / 100;
   function seeded(seed) { let state = seed >>> 0; return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; }; }
-  const dirsAt = abs => abs < SECOND ? { home: 1, away: -1 } : { home: -1, away: 1 };
+  const dirsAt = abs => (abs < SECOND || (abs >= EXTRA && abs < EXTRA_SECOND)) ? { home: 1, away: -1 } : { home: -1, away: 1 };
   function weighted(items, weights, random) {
     const total = weights.reduce((sum, weight) => sum + weight, 0);
     let draw = random() * total;
@@ -30,7 +30,7 @@
       players.push({ side, index, slot, role: slot.position, keeper: slot.position === 'GK', name: info.name || '', id: info.id, x: 0, y: 0, vx: 0, vy: 0, top: 6.4 + clamp((info.rating || 70) - 60, -10, 35) * .045, wx: 0, wy: 0, task: null });
     });
     const ball = { x: LENGTH / 2, y: WIDTH / 2, z: 0, owner: null, flight: null }, frames = [], events = [], steps = [];
-    let possession = plan.side, t = 0, climax = null, next = 0, waitUntil = 0, ended = false, deadBall = false;
+    let possession = plan.side, t = 0, climax = null, next = 0, waitUntil = 0, ended = false, deadBall = false, chaser = null;
     const teamOf = side => players.filter(p => p.side === side);
     const outfield = side => teamOf(side).filter(p => !p.keeper);
     const goalX = side => dirs[side] === 1 ? LENGTH : 0;
@@ -41,6 +41,12 @@
     const nearest = (list, point) => list.slice().sort((a, b) => gap(a, point) - gap(b, point))[0];
     const say = (text, extra = {}) => events.push({ t, text, ...extra });
     const within = (point, side) => ({ x: clamp(point.x, dirs[side] === 1 ? 3 : 6, dirs[side] === 1 ? LENGTH - 6 : LENGTH - 3), y: clamp(point.y, 2, WIDTH - 2) });
+    // Offside: attackers stay level with the second-last defender (or the ball, or halfway) until the ball is played.
+    function offsideLine(side) {
+      const deepest = teamOf(other(side)).map(p => depth(side, p)).sort((a, b) => b - a);
+      return Math.max(deepest[1] ?? LENGTH / 2, depth(side, ball), LENGTH / 2);
+    }
+    const onside = (side, point, margin = .8) => { const line = offsideLine(side) - margin; return depth(side, point) <= line ? point : { x: dirs[side] === 1 ? line : LENGTH - line, y: point.y }; };
     // Team shape: lines step up and drop with the ball; the side without it stays compact and narrow.
     function shape(p) {
       const dir = dirs[p.side], u = depth(p.side, ball), attacking = possession === p.side, toX = value => dir === 1 ? value : LENGTH - value;
@@ -52,7 +58,8 @@
       const line = clamp((100 - p.slot.y - 25) / 65, 0, 1);
       const back = attacking ? clamp(u - 32, 16, 58) : clamp(u - 20, 7, 48), front = attacking ? clamp(u + 16, 42, 96) : clamp(back + 30, 30, 75);
       const middle = WIDTH / 2, base = p.slot.x / 100 * WIDTH, spread = attacking ? (WIDE.has(p.role) ? 1.15 : 1) : .72;
-      return { x: toX(back + (front - back) * line) + p.wx, y: clamp(middle + (base - middle) * spread + (ball.y - middle) * (attacking ? .18 : .32) + p.wy, 2, WIDTH - 2) };
+      const point = { x: toX(back + (front - back) * line) + p.wx, y: clamp(middle + (base - middle) * spread + (ball.y - middle) * (attacking ? .18 : .32) + p.wy, 2, WIDTH - 2) };
+      return attacking && !deadBall ? onside(p.side, point) : point;
     }
     const aim = task => typeof task.point === 'function' ? task.point() : task.point;
     // The nearest defender presses the ball; the next one covers the space behind.
@@ -90,9 +97,18 @@
         ball.z = flight.height * 4 * s * (1 - s);
         if (s >= 1) {
           ball.flight = null; ball.z = 0;
-          if (flight.receiver) { ball.owner = flight.receiver; possession = flight.receiver.side; flight.receiver.task = null; }
+          if (flight.receiver) {
+            const receiver = flight.receiver; possession = receiver.side;
+            if (gap(receiver, ball) < 1.6) { ball.owner = receiver; receiver.task = null; }
+            else { chaser = receiver; receiver.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true }; }
+          }
           if (flight.arrive) flight.arrive();
         }
+      } else if (chaser) {
+        // The ball runs on towards its receiver, who closes it down; neither ever jumps.
+        const dx = chaser.x - ball.x, dy = chaser.y - ball.y, distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < 1.2) { ball.owner = chaser; chaser.task = null; chaser = null; }
+        else { const step = Math.min(distance, 4 * DT) / distance; ball.x += dx * step; ball.y += dy * step; }
       } else if (ball.owner) {
         const owner = ball.owner, speed = Math.sqrt(owner.vx * owner.vx + owner.vy * owner.vy);
         ball.x = owner.x + (speed > .3 ? owner.vx / speed * .75 : dirs[owner.side] * .6); ball.y = owner.y + (speed > .3 ? owner.vy / speed * .75 : 0);
@@ -101,8 +117,8 @@
     function kick(to, speed, height, kind, receiver = null, arrive = null) {
       const from = { x: ball.x, y: ball.y }, kicker = ball.owner;
       let dur = gap(from, to) / speed + .12;
-      if (receiver && !receiver.keeper && kind !== 'shot') dur = Math.max(dur, gap(receiver, to) / (receiver.top * .95) + .1);
-      ball.owner = null; if (kicker) kicker.task = null;
+      if (receiver && !receiver.keeper && kind !== 'shot') dur = Math.max(dur, gap(receiver, to) / (receiver.top * .9) + .5);
+      ball.owner = null; chaser = null; if (kicker) kicker.task = null;
       ball.flight = { from, to, t0: t, dur, height, kind, receiver, arrive };
       if (receiver) receiver.task = { point: to, sprint: true };
     }
@@ -110,6 +126,13 @@
     const insert = (...list) => steps.splice(next, 0, ...list);
     function waitFor(condition, limit) { let deadline = null; const step = () => { if (deadline === null) deadline = t + limit; if (condition() || t >= deadline) return 0; insert(step); return .2; }; return step; }
     const release = () => () => { for (const p of players) p.task = null; return 0; };
+    // Dead balls: the ball is rolled back to its spot and the taker goes to stand over it; nobody teleports.
+    const placeBall = spot => () => { ball.owner = null; chaser = null; deadBall = true; if (gap(ball, spot) > .3) kick(spot, Math.max(8, gap(ball, spot) / 2.2), 0, 'ground'); return 0; };
+    const takeAt = (p, spot, settle = .8) => [
+      () => { p.task = { point: spot, sprint: true }; return 0; },
+      waitFor(() => gap(p, spot) < 1.3, 15),
+      () => { ball.x = spot.x; ball.y = spot.y; ball.z = 0; ball.owner = p; p.task = { point: { x: p.x, y: p.y } }; return settle; },
+    ];
     const hold = seconds => () => { const owner = ball.owner; if (owner) owner.task = { point: () => ({ x: owner.x + dirs[owner.side] * 2.5, y: owner.y }) }; return seconds; };
     const carry = (seconds, target) => () => { const owner = ball.owner; if (owner) owner.task = { point: target(owner), sprint: true }; return seconds; };
     function chooseReceiver(side, from, { forward = true, min = 6, max = 36 } = {}) {
@@ -117,13 +140,19 @@
       return weighted(options, options.map(p => {
         const distance = gap(p, from), progress = depth(side, p) - depth(side, from), open = Math.min(...opponents.map(o => gap(o, p)));
         if (distance < min || distance > max) return .02;
+        if (depth(side, p) > offsideLine(side) + .2) return .01;
         return Math.max(.05, 1 + progress / 15 * (forward ? 1 : .2)) * (.5 + Math.min(open, 10) / 6);
       }), random);
     }
-    const pass = (choose, kind = 'ground') => () => {
+    const pass = (choose, kind = 'ground', waits = 0) => () => {
       const owner = ball.owner; if (!owner) return 0;
       const receiver = choose(owner);
       if (!receiver || receiver === owner) return .3;
+      // A receiver caught offside checks back before the pass is played.
+      if (waits < 12 && kind !== 'throw' && depth(receiver.side, receiver) > offsideLine(receiver.side) - .1) {
+        const back = onside(receiver.side, receiver, 2); receiver.task = { point: back, sprint: true };
+        insert(pass(() => receiver, kind, waits + 1)); return .3;
+      }
       const to = within({ x: receiver.x + receiver.vx * .7 + dirs[receiver.side] * (kind === 'long' ? 4 : 2.5), y: receiver.y + receiver.vy * .7 }, receiver.side);
       kick(to, kind === 'long' ? 21 : kind === 'throw' ? 11 : 15, kind === 'long' ? 8 : kind === 'throw' ? 2 : 0, kind, receiver);
       return 0;
@@ -136,7 +165,8 @@
         say('Throw-in', { side });
         const thrower = nearest(outfield(side), spot);
         thrower.task = { point: { x: spot.x, y: line < 1 ? -.4 : WIDTH + .4 } };
-        insert(waitFor(() => gap(thrower, spot) < 1.3, 4), () => { ball.owner = thrower; possession = side; return .7; }, pass(o => chooseReceiver(side, o, { forward: false, max: 20 }), 'throw'));
+        possession = side; deadBall = true;
+        insert(...takeAt(thrower, spot, .7), () => { deadBall = false; return 0; }, pass(o => chooseReceiver(side, o, { forward: false, max: 20 }), 'throw'));
       });
       return 0;
     };
@@ -162,32 +192,31 @@
       const keeper = keeperOf(side), spot = { x: ownGoalX(side) + dirs[side] * 5.5, y: WIDTH / 2 + (random() - .5) * 14 };
       return [
         release(),
-        () => { possession = side; keeper.task = { point: spot }; return 1; },
-        () => { ball.x = spot.x; ball.y = spot.y; ball.z = 0; deadBall = true; say('Goal kick', { side }); return 0; },
-        waitFor(() => gap(keeper, spot) < 1, 4),
-        () => { ball.owner = keeper; return 1.2; },
+        () => { possession = side; say('Goal kick', { side }); return 0; },
+        placeBall(spot),
+        ...takeAt(keeper, spot, 1.2),
         () => { deadBall = false; return 0; },
         pass(o => chooseReceiver(side, o, { min: 25, max: 60 }), 'long'), () => 1.2,
       ];
     }
     // Corners: attackers attack the box, defenders mark them, then the delivery.
-    function corner(side, taker, target, finish) {
-      const gx = goalX(side), dir = dirs[side], flag = { x: gx - dir * .4, y: random() < .5 ? .4 : WIDTH - .4 };
+    function corner(side, chosen, target, finish) {
+      const gx = goalX(side), dir = dirs[side], flag = { x: gx - dir * .4, y: ball.y < WIDTH / 2 ? .4 : WIDTH - .4 };
+      const taker = chosen || nearest(outfield(side).filter(p => p !== target), flag);
       const attackers = outfield(side).filter(p => p !== taker).sort((a, b) => depth(side, b) - depth(side, a)).slice(0, 5);
       if (target && !attackers.includes(target)) attackers[4] = target;
       const defending = other(side), markers = outfield(defending);
       return [
         release(),
         () => {
-          say('Corner', { side }); possession = side; ball.owner = null; taker.task = { point: flag, sprint: true };
+          say('Corner', { side }); possession = side; taker.task = { point: flag, sprint: true };
           attackers.forEach((p, index) => { p.task = { point: { x: gx - dir * (5 + (index % 3) * 3.5), y: WIDTH / 2 + (index - 2) * 3.4 } }; });
           const used = new Set();
           attackers.forEach(attacker => { const marker = nearest(markers.filter(p => !used.has(p)), attacker); if (marker) { used.add(marker); marker.task = { point: () => ({ x: attacker.x + dir, y: attacker.y }) }; } });
-          return .8;
+          return 0;
         },
-        () => { ball.x = flag.x; ball.y = flag.y; ball.z = 0; deadBall = true; return 0; },
-        waitFor(() => gap(taker, flag) < 1.3, 5),
-        () => { ball.owner = taker; return 1.4; },
+        placeBall(flag),
+        ...takeAt(taker, flag, 1.4),
         () => {
           const header = target || attackers[Math.floor(random() * attackers.length)], landing = { x: gx - dir * (6 + random() * 4), y: WIDTH / 2 + (random() - .5) * 10 };
           say(`${surname(taker.name)} swings it in`, { side }); deadBall = false;
@@ -202,10 +231,21 @@
         },
       ];
     }
-    function shoot(shooter, outcome, { header = false, speed: strike = null, height = null } = {}) {
+    const RANGE = 22;
+    function shoot(shooter, outcome, options = {}) {
+      const { header = false, speed: strike = null, height = null, setPiece = false, tries = 0 } = options;
       return () => {
         const side = shooter.side, gx = goalX(side), dir = dirs[side], defending = other(side), keeper = keeperOf(defending);
-        if (ball.owner !== shooter) ball.owner = shooter;
+        if (ball.owner !== shooter) {
+          // A teammate has it: they find the shooter first. A loose ball: the shooter goes and gets it.
+          if (ball.owner && ball.owner.side === side && tries < 3) { insert(pass(() => shooter), shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0; }
+          ball.owner = null; chaser = shooter; shooter.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true };
+          insert(shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0;
+        }
+        if (!setPiece && !header && tries < 8 && gap(shooter, { x: gx, y: WIDTH / 2 }) > RANGE) {
+          const aim = { x: gx - dir * (13 + random() * 6), y: WIDTH / 2 + clamp(shooter.y - WIDTH / 2, -14, 14) * .55 };
+          insert(carry(1.4, () => aim), shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0;
+        }
         if (outcome !== 'goal') climax ??= t;
         deadBall = false;
         const speed = strike ?? (header ? 16 : 26), sign = random() < .5 ? -1 : 1;
@@ -229,8 +269,7 @@
           say(`${surname(shooter.name)} shoots`, { side });
           kick(to, 20, 1, 'shot', null, () => {
             say(`Blocked by ${surname(blocker?.name)}`, { side: defending });
-            const taker = outfield(side).find(p => WIDE.has(p.role) && p.role !== 'LB' && p.role !== 'RB') || outfield(side)[0];
-            insert(...corner(side, taker, null, random() < .35 ? 'claim' : 'clear'));
+            insert(...corner(side, null, null, random() < .35 ? 'claim' : 'clear'));
           });
         }
         return 0;
@@ -242,15 +281,16 @@
       const foul = kind === 'penalty' ? { x: gx - dir * (8 + random() * 6), y: WIDTH / 2 + (random() - .5) * 18 } : spot;
       const toGoal = { x: gx - spot.x, y: WIDTH / 2 - spot.y }, length = Math.sqrt(toGoal.x * toGoal.x + toGoal.y * toGoal.y) || 1, ux = toGoal.x / length, uy = toGoal.y / length;
       return [
-        carry(1.8, () => foul),
+        () => { const owner = ball.owner; if (owner) owner.task = { point: foul, sprint: true }; return 0; },
+        waitFor(() => !ball.owner || gap(ball.owner, foul) < 2, 14),
         () => { const fouler = nearest(outfield(defending), ball); fouler.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true }; return .8; },
         () => {
           say(`Foul on ${surname(victim.name)}`, { side });
           say(kind === 'penalty' ? 'Penalty!' : 'Free kick in a dangerous position', { side, setPiece: kind });
-          ball.owner = null; possession = side; deadBall = true;
+          ball.owner = null; chaser = null; possession = side; deadBall = true;
           for (const p of players) p.task = null;
-          ball.x = spot.x; ball.y = spot.y; ball.z = 0;
-          taker.task = { point: { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 } };
+          if (gap(ball, spot) > .3) kick(spot, clamp(gap(ball, spot) / 1.5, 6, 14), 0, 'ground');
+          taker.task = { point: { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 }, sprint: true };
           keeper.task = { point: kind === 'penalty' ? { x: gx, y: WIDTH / 2 } : { x: gx - dir * .8, y: WIDTH / 2 + (spot.y < WIDTH / 2 ? 1.6 : -1.6) } };
           if (kind === 'penalty') {
             // Everyone else waits outside the box, level with or behind the spot.
@@ -265,9 +305,9 @@
           }
           return 2.8;
         },
-        () => { taker.task = { point: { x: spot.x, y: spot.y } }; return .6; },
-        () => { ball.owner = taker; ball.x = spot.x; ball.y = spot.y; return .5; },
-        shoot(taker, outcome, kind === 'penalty' ? { speed: 24, height: .6 } : { speed: 22, height: 3.4 }),
+        waitFor(() => gap(taker, { x: spot.x - ux * 2.4, y: spot.y - uy * 2.4 }) < 1.3, 12),
+        ...takeAt(taker, spot, .5),
+        shoot(taker, outcome, kind === 'penalty' ? { speed: 24, height: .6, setPiece: true } : { speed: 22, height: 3.4, setPiece: true }),
         () => 1, release(),
       ];
     }
@@ -282,7 +322,7 @@
       const style = plan.style || (assister ? (WIDE.has(assister.role) || random() < .35 ? 'cross' : 'through') : 'solo');
       if (style === 'penalty' || style === 'freekick') {
         const victim = style === 'penalty' ? finisher : outfield(side).filter(p => p !== finisher).sort((a, b) => (ATTACKING[b.role] || 0) - (ATTACKING[a.role] || 0))[0] || finisher;
-        start(side, 40 + random() * 15);
+        start(side, 55 + random() * 12);
         insert(...buildUp(side, 1 + Math.floor(random() * 2), victim), ...setPiece(side, style, finisher, victim, outcome));
         return;
       }
@@ -290,7 +330,8 @@
         // A shot deflected behind, then the real assister's corner and the real scorer's header.
         const shooter = outfield(side).find(p => p !== finisher && p !== assister) || finisher;
         start(side, 55 + random() * 15);
-        insert(...buildUp(side, 1, shooter), carry(1, o => within({ x: gx - dir * 20, y: o.y }, side)), () => {
+        const edge = { x: gx - dir * (18 + random() * 4), y: WIDTH / 2 + (random() - .5) * 20 };
+        insert(...buildUp(side, 1, shooter), () => { if (ball.owner) ball.owner.task = { point: edge, sprint: true }; return 0; }, waitFor(() => !ball.owner || gap(ball.owner, edge) < 2.5, 7), () => {
           say(`${surname(shooter.name)} shoots`, { side });
           kick({ x: gx + dir, y: WIDTH / 2 + (random() < .5 ? -1 : 1) * (POST + 3) }, 20, 1, 'shot', null, () => {
             say('Deflected behind', { side: other(side) });
@@ -300,18 +341,30 @@
         });
         return;
       }
-      start(side, 25 + random() * 22);
+      start(side, style === 'solo' ? 42 + random() * 16 : 25 + random() * 22);
       if (style === 'cross') {
+        // The winger reaches the byline area; the striker times the run to stay onside until the cross.
         const run = { x: gx - dir * (6 + random() * 5), y: WIDTH / 2 + (random() - .5) * 8 };
+        let wing = null;
         insert(...buildUp(side, n, assister),
-          () => { const owner = ball.owner; if (owner) owner.task = { point: { x: gx - dir * 13, y: owner.y < WIDTH / 2 ? 6 : WIDTH - 6 }, sprint: true }; finisher.task = { point: run, sprint: true }; return 2.2; },
-          () => { say(`${surname(ball.owner?.name)} crosses`, { side }); kick(run, 20, 5, 'cross', finisher); return 0; },
+          () => { const owner = ball.owner; if (owner) { wing = { x: gx - dir * (11 + random() * 6), y: owner.y < WIDTH / 2 ? 5 + random() * 5 : WIDTH - 5 - random() * 5 }; owner.task = { point: wing, sprint: true }; } finisher.task = { point: () => onside(side, run, 1.2), sprint: true }; return 0; },
+          waitFor(() => !ball.owner || !wing || gap(ball.owner, wing) < 2.5, 6),
+          waitFor(() => depth(side, finisher) < offsideLine(side) - .2, 2),
+          () => {
+            if (depth(side, finisher) > offsideLine(side) - .1) { insert(pass(() => finisher)); return 0; }
+            say(`${surname(ball.owner?.name || assister.name)} crosses`, { side }); kick(run, 20, 5, 'cross', finisher); return 0;
+          },
           shoot(finisher, outcome, { header: true }));
       } else if (style === 'through') {
+        // The runner waits on the last defender's shoulder and only goes when the pass is played.
         const run = { x: gx - dir * (14 + random() * 5), y: WIDTH / 2 + (random() - .5) * 18 };
         insert(...buildUp(side, n, assister),
-          () => { finisher.task = { point: run, sprint: true }; return .7; },
-          () => { say(`${surname(ball.owner?.name)} slides it through`, { side }); kick(run, 17, 0, 'through', finisher); return 0; },
+          () => { finisher.task = { point: () => onside(side, run, 1.2), sprint: true }; return .8; },
+          waitFor(() => depth(side, finisher) < offsideLine(side) - .2, 3),
+          () => {
+            if (depth(side, finisher) > offsideLine(side) - .1) { insert(pass(() => finisher)); return 0; }
+            say(`${surname(ball.owner?.name || assister.name)} slides it through`, { side }); kick(run, 17, 0, 'through', finisher); return 0;
+          },
           carry(.6, o => ({ x: o.x + dir * 4, y: o.y + (WIDTH / 2 - o.y) * .2 })),
           shoot(finisher, outcome));
       } else {
@@ -337,7 +390,7 @@
     const record = () => frames.push([round(ball.x), round(ball.y), round(ball.z), ball.owner ? players.indexOf(ball.owner) : -1, ...players.flatMap(p => [round(p.x), round(p.y)])]);
     record();
     for (let index = 0; index < 600 && !ended; index++) {
-      while (!ended && !ball.flight && t >= waitUntil) {
+      while (!ended && !ball.flight && !chaser && t >= waitUntil) {
         if (next >= steps.length) { ended = true; break; }
         waitUntil = t + (steps[next++]() || 0);
       }
@@ -353,7 +406,7 @@
     const teams = { home: { squad: home.squad, slots: slotsOf(home) }, away: { squad: away.squad, slots: slotsOf(away) } };
     const goals = [...result.homeScorers.map(goal => ({ ...goal, side: 'home' })), ...result.awayScorers.map(goal => ({ ...goal, side: 'away' }))].map(goal => ({ ...goal, abs: leagueCore.absoluteMinute(goal) }));
     // One half at a time in substitutes mode: only what happens between from and to is played out.
-    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }].filter(plan => plan.abs >= from && plan.abs < to);
+    const plans = [{ kind: 'kickoff', side: 'home', abs: 0, priority: 3 }, { kind: 'kickoff', side: 'away', abs: SECOND, priority: 3 }, { kind: 'kickoff', side: 'home', abs: EXTRA, priority: 3 }, { kind: 'kickoff', side: 'away', abs: EXTRA_SECOND, priority: 3 }].filter(plan => plan.abs >= from && plan.abs < to);
     let penalties = 0;
     goals.filter(goal => goal.abs > from - (from ? 0 : 1) && goal.abs <= to).forEach(goal => {
       const roll = random();
@@ -365,7 +418,7 @@
     function chance(side, priority) {
       for (let attempt = 0; attempt < 30; attempt++) {
         const abs = from + 4 + random() * (to - from - 7);
-        if (Math.abs(abs - SECOND) < 2.5 || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
+        if ([SECOND, EXTRA, EXTRA_SECOND].some(mark => Math.abs(abs - mark) < 2.5) || plans.some(item => Math.abs(item.abs - abs) < 3.5)) continue;
         const roll = random(), set = random(), style = set < .015 && penalties === 0 ? 'penalty' : set < .11 ? 'freekick' : null;
         if (style === 'penalty') penalties++;
         const outcome = style ? (roll < .55 ? 'saved' : 'wide') : roll < .4 ? 'saved' : roll < .72 ? 'wide' : 'blocked';
@@ -417,13 +470,15 @@
     const events = highlights.flatMap(item => item.events.filter(event => event.t >= item.cut).map(event => ({ ...event, abs: event.goal ? item.plan.abs : item.a0 + (event.t - item.cut) / 60 })));
     if (from < 48 && to >= 48) events.push({ abs: 48, text: 'Half-time' });
     if (to === END) events.push({ abs: END, text: 'Full time' });
-    return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights };
+    if (to > END) events.push({ abs: END, text: 'Level after 90 minutes · extra time' }, { abs: EXTRA_SECOND, text: 'Half-time in extra time' }, { abs: to, text: 'End of extra time' });
+    return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights, to };
   }
   const pieceAt = (timeline, r) => timeline.pieces.find(piece => r < piece.r1) || timeline.pieces.at(-1);
   function clockAt(timeline, r) {
     const piece = pieceAt(timeline, r);
-    if (r >= piece.r1) return Math.min(END, piece.a1);
-    return Math.min(END, piece.a0 + (piece.a1 - piece.a0) * clamp((r - piece.r0) / Math.max(.001, piece.r1 - piece.r0), 0, 1));
+    const end = timeline.to ?? END;
+    if (r >= piece.r1) return Math.min(end, piece.a1);
+    return Math.min(end, piece.a0 + (piece.a1 - piece.a0) * clamp((r - piece.r0) / Math.max(.001, piece.r1 - piece.r0), 0, 1));
   }
   function frameOf(item, seconds) {
     const position = clamp(seconds / DT, 0, item.frames.length - 1), low = Math.floor(position), high = Math.min(item.frames.length - 1, low + 1), s = position - low;

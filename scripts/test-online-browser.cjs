@@ -18,11 +18,12 @@ const { chromium } = require(require.resolve('playwright', { paths: [packages] }
     const code = await host.locator('.big-code').innerText();
     assert(await host.locator('[data-do=start]').isDisabled());
     for (const [page, name] of [[guest, 'Blair'], [third, 'CaseysLegendaryXI1234567']]) { await page.locator('#join-name').fill(name); await page.locator('#join-code').fill(code); await page.locator('#join-form .primary').click(); await page.locator('.big-code').waitFor(); await page.locator('[data-do=ready]').click(); }
-    // The host edits the rules in the lobby; guests see them and ready up again.
-    await host.locator('#rules-form #formation').selectOption('4-4-2'); await host.locator('#rules-form .primary').click();
+    // The host edits the rules in the lobby; they save themselves, and guests see them and ready up again.
+    assert.equal(await host.locator('#rules-form button').count(), 0, 'Rules save automatically');
+    await host.locator('#rules-form #formation').selectOption('4-4-2'); await host.locator('#rules-state', { hasText: 'Saved' }).waitFor();
     await guest.waitForFunction(() => document.querySelector('.rules')?.textContent.includes('4-4-2'));
     assert.match(await guest.locator('[data-do=ready]').innerText(), /I’m ready/);
-    await host.locator('#rules-form #formation').selectOption('4-1-2-1-2 (diamond)'); await host.locator('#rules-form .primary').click();
+    await host.locator('#rules-form #formation').selectOption('4-1-2-1-2 (diamond)');
     await guest.waitForFunction(() => document.querySelector('.rules')?.textContent.includes('diamond'));
     for (const page of [guest, third]) await page.locator('[data-do=ready]').click();
     await host.locator('[data-do=ready]').click(); await host.locator('[data-do=start]').click();
