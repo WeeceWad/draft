@@ -7,7 +7,7 @@ const league = require('../src/league-core.js');
 const LENGTH = 105, WIDTH = 68, DT = .1;
 const formations = Object.keys(draft.formations);
 const squadFor = (formation, tag) => draft.formations[formation].map((slot, i) => ({ id: `${tag}${i}`, name: `${tag} Player${i}`, position: slot.position, rating: 70 + (i * 7) % 20 }));
-const stats = { passes: 0, offside: 0, goals: 0, far: 0, corners: 0, badCorners: 0, ballJumps: 0, playerJumps: 0 };
+const stats = { length: 0, long: 0, switches: 0, passes: 0, offside: 0, goals: 0, far: 0, corners: 0, badCorners: 0, ballJumps: 0, playerJumps: 0 };
 for (let seed = 1; seed <= 250; seed++) {
   const hf = formations[seed % formations.length], af = formations[(seed * 7) % formations.length];
   const home = { formation: hf, squad: squadFor(hf, 'H') }, away = { formation: af, squad: squadFor(af, 'A') };
@@ -38,6 +38,7 @@ for (let seed = 1; seed <= 250; seed++) {
         const receiver = g < frames.length ? frames[g][3] : -1;
         if (receiver >= 0 && receiver !== a[3] && sideOf(receiver) === side && !item.players[receiver].keeper) {
           const defenders = item.players.map((p, i) => i).filter(i => sideOf(i) !== side).map(i => depth(side, a[4 + 2 * i])).sort((x, y) => y - x);
+          const length = Math.hypot(frames[g][0] - a[0], frames[g][1] - a[1]); stats.length += length; if (length > 32) stats.long++; if (Math.abs(frames[g][1] - a[1]) > 25) stats.switches++;
           stats.passes++; if (depth(side, a[4 + 2 * receiver]) > Math.max(defenders[1], depth(side, a[0]), LENGTH / 2) + .5) stats.offside++;
         }
       }
@@ -57,8 +58,10 @@ for (let seed = 1; seed <= 250; seed++) {
 }
 assert(stats.passes > 3000 && stats.goals > 400 && stats.corners > 150, JSON.stringify(stats));
 assert(stats.offside <= stats.passes / 2000, `Offside receivers: ${JSON.stringify(stats)}`);
+// Patient, mostly short passing: few long balls and few switches of play from flank to flank.
+assert(stats.length / stats.passes < 22 && stats.long / stats.passes < .13 && stats.switches / stats.passes < .13, `Passing style: ${JSON.stringify(stats)}`);
 assert.equal(stats.far, 0, 'No goals from distance'); assert.equal(stats.badCorners, 0, 'Corners are taken from the flag');
 assert.equal(stats.ballJumps, 0, 'The ball never jumps'); assert.equal(stats.playerJumps, 0, 'Players never jump');
 // Extra-time goals sit on the clock after 97 (91'–120'), labelled with their real minute.
 assert.equal(league.absoluteMinute({ minute: 105, extra: true }), 112); assert.equal(league.minuteLabel({ minute: 105, extra: true }), '105′');
-console.log(`Match view passed: ${stats.passes} passes onside (${stats.offside} marginal), ${stats.goals} goals in range, ${stats.corners} corners from the flag, no jumps.`);
+console.log(`Match view passed: ${stats.passes} passes averaging ${(stats.length / stats.passes).toFixed(1)}m (${(100 * stats.long / stats.passes).toFixed(0)}% long), onside (${stats.offside} marginal), ${stats.goals} goals in range, ${stats.corners} corners from the flag, no jumps.`);

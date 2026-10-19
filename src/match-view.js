@@ -135,13 +135,23 @@
     ];
     const hold = seconds => () => { const owner = ball.owner; if (owner) owner.task = { point: () => ({ x: owner.x + dirs[owner.side] * 2.5, y: owner.y }) }; return seconds; };
     const carry = (seconds, target) => () => { const owner = ball.owner; if (owner) owner.task = { point: target(owner), sprint: true }; return seconds; };
-    function chooseReceiver(side, from, { forward = true, min = 6, max = 36 } = {}) {
+    // How close the nearest opponent is to the line of a pass: a defender within a couple of metres cuts it out.
+    function laneGap(from, to, opponents) {
+      const dx = to.x - from.x, dy = to.y - from.y, length = dx * dx + dy * dy || 1;
+      return Math.min(...opponents.map(o => { const s = clamp(((o.x - from.x) * dx + (o.y - from.y) * dy) / length, .1, 1); return gap(o, { x: from.x + dx * s, y: from.y + dy * s }); }));
+    }
+    function chooseReceiver(side, from, { forward = true, min = 6, max = 30, toward = null } = {}) {
       const options = outfield(side).filter(p => p !== ball.owner), opponents = teamOf(other(side));
       return weighted(options, options.map(p => {
         const distance = gap(p, from), progress = depth(side, p) - depth(side, from), open = Math.min(...opponents.map(o => gap(o, p)));
-        if (distance < min || distance > max) return .02;
-        if (depth(side, p) > offsideLine(side) + .2) return .01;
-        return Math.max(.05, 1 + progress / 15 * (forward ? 1 : .2)) * (.5 + Math.min(open, 10) / 6);
+        // Out of range or offside are last resorts, scaled down from the option's own score rather than floored.
+        const range = distance < min || distance > max ? .01 : 1, offside = depth(side, p) > offsideLine(side) + .2 ? .005 : 1;
+        const ideal = (distance - 14) / 8, length = 1 / (1 + ideal * ideal);
+        const lane = laneGap(from, p, opponents), blocked = lane < 1.8 ? .08 : lane < 3.5 ? .45 : 1;
+        const across = Math.abs(p.y - from.y), switchOfPlay = across > 22 ? .2 : across > 15 ? .6 : 1;
+        const central = depth(side, p) > 60 && Math.abs(p.y - WIDTH / 2) < 13 ? 1.5 : 1;
+        const target = toward && p !== toward ? 1 + 1.6 / (1 + gap(p, toward) / 12) : toward === p ? 2.2 : 1;
+        return Math.max(.05, 1 + progress / 18 * (forward ? 1 : .2)) * (.45 + Math.min(open, 9) / 6) * length * blocked * switchOfPlay * central * target * range * offside;
       }), random);
     }
     const pass = (choose, kind = 'ground', waits = 0) => () => {
@@ -170,13 +180,30 @@
       });
       return 0;
     };
+    // A one-two: play it short and run past your marker for the return.
+    const oneTwo = side => () => {
+      const owner = ball.owner; if (!owner) return 0;
+      const mate = chooseReceiver(side, owner, { min: 6, max: 15 });
+      if (!mate || mate === owner) return 0;
+      const run = within({ x: owner.x + dirs[side] * 11, y: owner.y + (WIDTH / 2 - owner.y) * .25 }, side);
+      insert(pass(() => mate), () => { owner.task = { point: () => onside(side, run), sprint: true }; return .5; }, pass(() => owner));
+      return 0;
+    };
+    // Get the ball to a particular teammate: if they are far away, work it over in shorter passes first.
+    const reach = (side, target, tries = 0) => () => {
+      const owner = ball.owner; if (!owner || owner === target) return 0;
+      if (gap(owner, target) > 24 && tries < 3) { insert(pass(o => chooseReceiver(side, o, { toward: target, max: 22 })), hold(.3 + random() * .4), reach(side, target, tries + 1)); return 0; }
+      insert(pass(() => target)); return 0;
+    };
     function buildUp(side, count, finalReceiver) {
       const list = [];
       for (let index = 0; index < count; index++) {
-        list.push(random() < .45 ? carry(.8 + random() * 1.2, o => within({ x: o.x + dirs[side] * (5 + random() * 8), y: o.y + (random() - .5) * 10 }, side)) : hold(.4 + random() * .8));
-        if (index === 1 && random() < .22) list.push(outForThrow());
+        const roll = random();
+        list.push(roll < .4 ? carry(.7 + random() * 1.1, o => within({ x: o.x + dirs[side] * (4 + random() * 7), y: o.y + (WIDTH / 2 - o.y) * .2 + (random() - .5) * 8 }, side)) : hold(.3 + random() * .6));
+        if (index === 1 && random() < .12) list.push(outForThrow());
         const last = index === count - 1;
-        list.push(pass(last && finalReceiver ? () => finalReceiver : o => chooseReceiver(side, o), !last && random() < .15 ? 'long' : 'ground'));
+        if (!last && random() < .14) { list.push(oneTwo(side)); continue; }
+        list.push(last && finalReceiver ? reach(side, finalReceiver) : pass(o => chooseReceiver(side, o, { toward: finalReceiver }), !last && random() < .04 ? 'long' : 'ground'));
       }
       return list;
     }
@@ -196,7 +223,7 @@
         placeBall(spot),
         ...takeAt(keeper, spot, 1.2),
         () => { deadBall = false; return 0; },
-        pass(o => chooseReceiver(side, o, { min: 25, max: 60 }), 'long'), () => 1.2,
+        random() < .65 ? pass(o => chooseReceiver(side, o, { forward: false, min: 6, max: 24 })) : pass(o => chooseReceiver(side, o, { min: 25, max: 55 }), 'long'), () => 1.2,
       ];
     }
     // Corners: attackers attack the box, defenders mark them, then the delivery.
@@ -238,7 +265,7 @@
         const side = shooter.side, gx = goalX(side), dir = dirs[side], defending = other(side), keeper = keeperOf(defending);
         if (ball.owner !== shooter) {
           // A teammate has it: they find the shooter first. A loose ball: the shooter goes and gets it.
-          if (ball.owner && ball.owner.side === side && tries < 3) { insert(pass(() => shooter), shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0; }
+          if (ball.owner && ball.owner.side === side && tries < 3) { insert(reach(side, shooter), shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0; }
           ball.owner = null; chaser = shooter; shooter.task = { point: () => ({ x: ball.x, y: ball.y }), sprint: true };
           insert(shoot(shooter, outcome, { ...options, tries: tries + 1 })); return 0;
         }
@@ -318,8 +345,9 @@
       ball.owner = owner; owner.x = ball.x - dirs[side] * .7; owner.y = ball.y;
     }
     function attack(side, finisher, assister, outcome) {
-      const n = 1 + Math.floor(random() * 3), gx = goalX(side), dir = dirs[side];
-      const style = plan.style || (assister ? (WIDE.has(assister.role) || random() < .35 ? 'cross' : 'through') : 'solo');
+      const n = 3 + Math.floor(random() * 4), gx = goalX(side), dir = dirs[side], wide = assister && WIDE.has(assister.role), roll = random();
+      // Central players thread it through; wide players cross or cut it back along the ground.
+      const style = plan.style || (!assister ? 'solo' : wide ? (roll < .55 ? 'cross' : roll < .85 ? 'cutback' : 'through') : (roll < .65 ? 'through' : roll < .85 ? 'cutback' : 'cross'));
       if (style === 'penalty' || style === 'freekick') {
         const victim = style === 'penalty' ? finisher : outfield(side).filter(p => p !== finisher).sort((a, b) => (ATTACKING[b.role] || 0) - (ATTACKING[a.role] || 0))[0] || finisher;
         start(side, 55 + random() * 12);
@@ -355,6 +383,18 @@
             say(`${surname(ball.owner?.name || assister.name)} crosses`, { side }); kick(run, 20, 5, 'cross', finisher); return 0;
           },
           shoot(finisher, outcome, { header: true }));
+      } else if (style === 'cutback') {
+        // To the byline, then pulled back along the ground to a runner arriving around the penalty spot.
+        const spot = { x: gx - dir * (9 + random() * 5), y: WIDTH / 2 + (random() - .5) * 10 };
+        let byline = null;
+        insert(...buildUp(side, n, assister),
+          () => { const owner = ball.owner; if (owner) { byline = { x: gx - dir * (4 + random() * 3), y: owner.y < WIDTH / 2 ? 12 + random() * 6 : WIDTH - 12 - random() * 6 }; owner.task = { point: byline, sprint: true }; } finisher.task = { point: () => onside(side, spot, 1.2), sprint: true }; return 0; },
+          waitFor(() => !ball.owner || !byline || gap(ball.owner, byline) < 2.5, 6),
+          () => {
+            if (depth(side, finisher) > offsideLine(side) - .1) { insert(pass(() => finisher)); return 0; }
+            say(`${surname(ball.owner?.name || assister.name)} cuts it back`, { side }); kick(within(spot, side), 16, 0, 'ground', finisher); return 0;
+          },
+          shoot(finisher, outcome));
       } else if (style === 'through') {
         // The runner waits on the last defender's shoulder and only goes when the pass is played.
         const run = { x: gx - dir * (14 + random() * 5), y: WIDTH / 2 + (random() - .5) * 18 };
@@ -384,7 +424,7 @@
       const side = plan.side, attackers = outfield(side);
       const finisher = (plan.scorerId && find(side, plan.scorerId)) || weighted(attackers, attackers.map(p => ATTACKING[p.role] || .5), random);
       const others = attackers.filter(p => p !== finisher);
-      const assister = plan.assistId ? find(side, plan.assistId) : plan.kind === 'chance' && random() < .6 ? weighted(others, others.map(p => ATTACKING[p.role] || .5), random) : null;
+      const assister = plan.assistId ? find(side, plan.assistId) : plan.kind === 'chance' && random() < .8 ? weighted(others, others.map(p => ATTACKING[p.role] || .5), random) : null;
       attack(side, finisher, assister === finisher ? null : assister, plan.kind === 'goal' ? 'goal' : plan.outcome);
     }
     const record = () => frames.push([round(ball.x), round(ball.y), round(ball.z), ball.owner ? players.indexOf(ball.owner) : -1, ...players.flatMap(p => [round(p.x), round(p.y)])]);
