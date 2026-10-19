@@ -1474,6 +1474,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     if (to > END) events.push({ abs: END, text: 'Level after 90 minutes · extra time' }, { abs: EXTRA_SECOND, text: 'Half-time in extra time' }, { abs: to, text: 'End of extra time' });
     return { pieces, events: events.sort((a, b) => a.abs - b.abs), speed, players: highlights[0].players, highlights, to };
   }
+  // Half-time (after 45+3), the end of 90 minutes and extra-time half-time on the 0–127 clock.
+  const BREAKS = [48, EXTRA, EXTRA_SECOND];
   const pieceAt = (timeline, r) => timeline.pieces.find(piece => r < piece.r1) || timeline.pieces.at(-1);
   function clockAt(timeline, r) {
     const piece = pieceAt(timeline, r);
@@ -1491,6 +1493,13 @@ body.dragging,body.dragging *{cursor:grabbing!important}
     if (piece.item) return { frame: frameOf(piece.item, piece.item.cut + (r - piece.r0) * timeline.speed), fast: false };
     const from = piece.from ? frameOf(piece.from, piece.from.length) : null, to = piece.to ? frameOf(piece.to, piece.to.cut) : null;
     const s = clamp((r - piece.r0) / Math.max(.001, piece.r1 - piece.r0), 0, 1), smooth = s * s * (3 - 2 * s), start = from || to, end = to || from;
+    // Teams change ends at the break itself: the first half's last picture holds through added time, then cuts
+    // to the line-up for the restart at the whistle, rather than everyone drifting across during stoppage time.
+    const mark = BREAKS.find(value => piece.a0 < value && piece.a1 >= value);
+    if (mark !== undefined && from && to) {
+      const clock = piece.a0 + (piece.a1 - piece.a0) * s;
+      return { frame: (clock < mark ? from : to).map((value, index) => index === 3 ? -1 : value), fast: false, break: true };
+    }
     return { frame: start.map((value, index) => index === 3 ? -1 : value + (end[index] - value) * smooth), fast: piece.r1 - piece.r0 > .4 && r < piece.r1 };
   }
   function intensity(timeline, r) {

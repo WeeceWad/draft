@@ -12,13 +12,20 @@ for (let seed = 1; seed <= 250; seed++) {
   const hf = formations[seed % formations.length], af = formations[(seed * 7) % formations.length];
   const home = { formation: hf, squad: squadFor(hf, 'H') }, away = { formation: af, squad: squadFor(af, 'A') };
   const extraTime = seed % 5 === 0;
-  const goals = (count, tag, extra) => Array.from({ length: count }, (_, i) => ({ playerId: `${tag}${10 - (i % 4)}`, name: `${tag} Player${10 - (i % 4)}`, minute: extra ? 92 + i * 9 : 5 + ((seed * 13 + i * 29) % 85), ...(i % 2 ? { assistId: `${tag}${7 + (i % 3)}`, assistName: 'y' } : {}), ...(extra ? { extra: true } : {}) }));
+  const goals = (count, tag, extra) => Array.from({ length: count }, (_, i) => ({ playerId: `${tag}${i % 4}`, name: `${tag} Player${i % 4}`, minute: extra ? 92 + i * 9 : 5 + ((seed * 13 + i * 29) % 85), ...(i % 2 ? { assistId: `${tag}${4 + (i % 3)}`, assistName: 'y' } : {}), ...(extra ? { extra: true } : {}) }));
   const result = { homeScorers: [...goals(seed % 4, 'H'), ...(extraTime ? goals(1, 'H', true) : [])], awayScorers: goals((seed >> 2) % 3, 'A'), homeXg: 1.5, awayXg: 1.1 };
   const to = extraTime ? 127 : view.END, timeline = view.build({ result, home, away, seed, duration: extraTime ? 196 : 150, to });
   assert.equal(view.clockAt(timeline, 1e9), to, 'The clock runs to the end of the match, extra time included');
   const real = [...result.homeScorers, ...result.awayScorers];
   assert.equal(timeline.events.filter(event => event.goal).length, real.length, 'Every real goal is shown');
   for (const goal of real) assert(timeline.events.some(event => event.goal && event.abs === league.absoluteMinute(goal)));
+  // Ends change at the whistle: keepers are at their first-half ends through added time, then swap.
+  const rAt = clock => { let low = 0, high = (extraTime ? 196 : 150); for (let step = 0; step < 50; step++) { const mid = (low + high) / 2; if (view.clockAt(timeline, mid) < clock) low = mid; else high = mid; } return high; };
+  const keeperX = (clock, side) => { const index = timeline.players.findIndex(p => p.keeper && p.side === side); return view.stateAt(timeline, rAt(clock)).frame[4 + 2 * index]; };
+  for (const [before, after] of [[46.5, 48.3], ...(extraTime ? [[112.2, 112.7]] : [])]) {
+    assert(keeperX(before, "home") < LENGTH / 2 && keeperX(before, 'away') > LENGTH / 2, `Ends hold until the break (${before})`);
+    assert(keeperX(after, 'home') > LENGTH / 2 && keeperX(after, 'away') < LENGTH / 2, `Ends swap at the break (${after})`);
+  }
   for (const item of timeline.highlights) {
     const abs = item.plan.abs, homeDir = (abs < 48.6 || (abs >= 97 && abs < 112.5)) ? 1 : -1;
     const sideOf = index => item.players[index].side, dir = side => side === 'home' ? homeDir : -homeDir, depth = (side, x) => dir(side) === 1 ? x : LENGTH - x;
