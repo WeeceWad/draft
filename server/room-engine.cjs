@@ -192,6 +192,8 @@ function apply(room, uid, command, now) {
   const system = uid === null && command.type === 'tick';
   const me = system ? null : member(room, uid);
   if (command.requestId && room.seen.includes(`${uid}:${command.requestId}`)) return { room, changed: false };
+  // An ended game is frozen: nothing settles and nobody can act, apart from heading to a rematch.
+  if (room.ended) { if (system) return { room, changed: false }; fail('The host has ended this game.', 409); }
   const expired = resolve(room, now);
   const stale = command.roundId !== undefined && command.roundId !== (room.round?.id ?? null);
   if (stale && ['bid', 'withdraw', 'reveal', 'skip'].includes(command.type)) {
@@ -437,6 +439,13 @@ function apply(room, uid, command, now) {
       host(room, uid);
       if (room.status !== 'lobby' || command.managerId === me.managerId) fail('Only another manager in the lobby can be removed.');
       room.members = room.members.filter(member => member.managerId !== command.managerId); break;
+    case 'endGame': {
+      // The host can end the game at any point: in the lobby, mid-auction or mid-season.
+      host(room, uid);
+      room.ended = { at: now, by: me.name, status: room.status };
+      room.round = null; room.live = null;
+      break;
+    }
     case 'transferHost': {
       host(room, uid);
       const next = room.members.find(member => member.managerId === command.managerId);
@@ -448,7 +457,7 @@ function apply(room, uid, command, now) {
   if (command.requestId) room.seen = [...room.seen, `${uid}:${command.requestId}`].slice(-100);
   return { room, changed: true };
 }
-const finished = room => !!room.league && leagueCore.nextEvent(room.league) === null;
+const finished = room => !!room.ended || (!!room.league && leagueCore.nextEvent(room.league) === null);
 // Point a finished room at its rematch. The first rematch wins; later callers join it.
 function linkNext(room, uid, next) {
   member(room, uid);
@@ -474,7 +483,7 @@ function view(room, uid) {
   // Planned Premier League results stay on the server until each matchday is played.
   const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion, competition: room.league.competition || 'friends', nextDerby: leagueCore.nextDerbyRound(room.league), subs: !!room.league.subs, pending: room.league.pending || null,
     form: !!room.league.form, cup: room.league.cup || null, europe: room.league.europe || null, window: room.league.window ? { after: room.league.window.after, done: room.league.window.done } : null, nextEvent: leagueCore.nextEvent(room.league) };
-  return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
+  return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, ended: room.ended || null, revision: room.revision, expiresAt: room.expiresAt,
     isHost: room.hostUid === uid, me: me.managerId, preview: room.config.competition === 'premier' && room.game && !room.league ? premierClubs(room.game).map(club => ({ name: club.name, strength: club.strength })) : null, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
     keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid, kit: member.kit || null })), window: room.window || null, game, round, league };
 }

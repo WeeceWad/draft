@@ -162,3 +162,4 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .comp .fixture.compact{padding:8px 0;border-bottom:1px solid var(--line)}.comp .fixture.compact:last-of-type{border-bottom:0}.comp .fixture.compact .score{color:var(--accent);font-size:20px}
 .scorer-lines{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:2px;font-size:12px;color:var(--muted)}.scorer-lines>div{display:flex;flex-direction:column}.scorer-lines .away{text-align:right}.scorer-lines b{color:var(--text);font-weight:700}
 button.copied{border-color:var(--green);color:var(--green)}
+button.danger{background:transparent;border:1px solid var(--red);color:var(--red)}button.danger.armed{background:var(--red);color:#1a0b0b;font-weight:800}

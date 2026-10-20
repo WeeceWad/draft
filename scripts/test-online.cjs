@@ -323,6 +323,22 @@ for (const [count, competition] of [[2, 'friends'], [3, 'premier'], [8, 'friends
   assert.deepEqual(engine.unpack(engine.pack(ucl)).league.europe, done, 'The whole competition replays exactly');
   assert(engine.finished(ucl));
 }
+// End game: the host can stop the game at any point; everything freezes and the room can head to a rematch.
+for (const stage of ['lobby', 'auction', 'season']) {
+  let over = lobby();
+  if (stage === 'season') { over = command(over, 'a', 'settings', { capacity: 3, config: { ...config, devMode: true } }); over.members.forEach(member => { over = command(over, member.uid, 'ready', { ready: true }); }); }
+  if (stage !== 'lobby') over = command(over, 'a', 'start');
+  if (stage === 'auction') { over = command(over, 'a', 'reveal'); time += 2000; over = command(over, 'b', 'bid', { price: 5 }); }
+  if (stage === 'season') { over = command(over, 'a', 'startLeague'); over = command(over, 'a', 'playRound'); assert(over.live); }
+  assert.throws(() => command(over, 'b', 'endGame'), /Only the host/);
+  over = command(over, 'a', 'endGame');
+  assert(over.ended && over.ended.by === 'Alex' && over.round === null && over.live === null);
+  assert(engine.finished(over) && engine.view(over, 'b').finished && engine.view(over, 'c').ended, 'Everyone sees the game is over');
+  assert.throws(() => command(over, 'b', 'ready', { ready: true }), /ended this game/);
+  assert.equal(engine.apply(over, null, { type: 'tick' }, time + 999999).changed, false, 'Nothing settles after the end');
+  assert(engine.linkNext(over, 'b', { id: 'again', code: '0009' }).changed, 'An ended game can go to a rematch');
+  assert.deepEqual(engine.unpack(engine.pack(over)).ended, over.ended);
+}
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
 assert.throws(() => command(room, 'b', 'formation', { formation: '3-5-2' }), /fixed formation/);

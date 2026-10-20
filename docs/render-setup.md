@@ -64,7 +64,7 @@ The hosted game is at `/`, and the original shared-device game is at `/offline.h
 
 Rooms last **24 hours**. Refreshing or reopening in the same browser restores your room and identity. You can also return home and rejoin with the same code. Anonymous identities are saved in an HttpOnly cookie for 30 days. Clearing cookies or changing devices creates a different identity; there is no account login or cross-device recovery in this version.
 
-The lobby host can remove a manager. Host controls can be handed to another room member under **Room options**. If the host disconnects, active bids still settle; the host can reconnect to continue revealing players, or should hand over controls before leaving.
+The lobby host can remove a manager. Host controls can be handed to another room member under **Room options**, which is on every screen. The host can also **End game** there at any point (tap twice to confirm): everything stops, everyone sees a Game over screen with the table so far, and **Play again** opens a fresh lobby with the same rules. When a new version of Touchline goes live, open tabs refresh themselves once nothing is in play and rejoin the room. If the host disconnects, active bids still settle; the host can reconnect to continue revealing players, or should hand over controls before leaving.
 
 The server validates every action, serializes conflicting room changes with database row locks, and checks auction deadlines when processing bids. PostgreSQL notifications broadcast room changes to connected devices. Absolute deadlines survive restarts; overdue auctions settle on startup. The live connection reconnects automatically after interruptions. [Render supports inbound WebSockets on web services](https://render.com/docs/websocket).
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('node:http');
 const path = require('node:path');
+const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const { MemoryStore, PostgresStore } = require('./store.cjs');
@@ -35,7 +36,9 @@ async function createServer({ store, now = Date.now, production = process.env.NO
   });
   const uidFor = async req => { const token = tokenFrom(req); return token && /^[a-f0-9]{64}$/.test(token) ? store.session(hash(token), now()) : null; };
   const auth = async (req, res, next) => { req.uid = await uidFor(req); if (!req.uid) return res.status(401).json({ error: 'Your session expired. Refresh to reconnect.' }); next(); };
-  const state = (room, uid) => ({ type: 'state', room: engine.view(room, uid), serverTime: now() });
+  // The build the server is serving, so tabs still running an older page know to refresh.
+  let build = null; try { build = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8').match(/name="touchline-build" content="([0-9a-f]+)"/)?.[1] || null; } catch {}
+  const state = (room, uid) => ({ type: 'state', room: engine.view(room, uid), serverTime: now(), build });
   const getRoom = async id => { if (!uuid(id)) throw new engine.RoomError('Room not found.', 404); const room = await store.get(id); if (!room || room.expiresAt <= now()) throw new engine.RoomError('Room not found or expired.', 404); return room; };
   const broadcast = async id => {
     const sockets = clients.get(id); if (!sockets?.size) return;
