@@ -202,7 +202,9 @@ const finishSeason = (state, uid = 'a') => { for (let guard = 0; guard < 400 && 
   assert.equal(league.nextEvent(cup.league), 'cup', 'The cup round comes when its matchday is reached');
   // Cup ties play live, on into extra time and a kick-by-kick shoot-out when they need them.
   const cupRound = cup.league.cup.round, started = time;
+  cup = command(cup, 'a', 'matchView', { view: 'pitch' });
   cup = command(cup, 'a', 'playRound');
+  assert.equal(cup.live.view, 'classic', 'Cup games always use the classic view');
   const liveTies = cup.league.cup.rounds[cupRound].ties.filter(tie => league.managerTie(cup.league, tie));
   assert(cup.live?.cup && liveTies.length, 'Cup ties with managers in them are live');
   const extraTime = liveTies.some(tie => tie.result.extraTime), kicks = Math.max(0, ...liveTies.map(tie => tie.result.penalties?.kicks.length || 0));

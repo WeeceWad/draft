@@ -318,7 +318,8 @@ function apply(room, uid, command, now) {
         break;
       }
       // Only games between managers play live; the rest are instant.
-      const derby = leagueCore.eventHasDerby(room.league), view = room.matchView === 'pitch' ? 'pitch' : 'classic';
+      // FA Cup and Champions League games always use the classic view; league matchdays follow the host's choice.
+      const derby = leagueCore.eventHasDerby(room.league), view = room.matchView === 'pitch' && event === 'league' ? 'pitch' : 'classic';
       if (event === 'cup') {
         // Ties with a manager in them play live: through extra time when one is level, then any shoot-out kick by kick.
         const cupRound = room.league.cup.round;

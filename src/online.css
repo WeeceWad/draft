@@ -157,3 +157,8 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .pens{margin:6px 0 0;letter-spacing:.5px}
 .euro-table .zone-top td:first-child{box-shadow:inset 3px 0 #5fd38d}.euro-table .zone-mid td:first-child{box-shadow:inset 3px 0 #f5be6e}.euro-table .zone-out td{opacity:.6}
 @media(max-width:799px){.euro-wrap table{table-layout:fixed}.euro-wrap :is(th,td):nth-child(n+4):nth-child(-n+6){display:none}.euro-wrap :is(th,td):nth-child(2){width:52%;white-space:normal;overflow-wrap:anywhere}}
+.comp{--accent:var(--green);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:10px 14px 4px;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 9%,transparent),transparent 70%)}.comp+.comp{margin-top:10px}.comp-league{--accent:#a3f670}.comp-cup{--accent:#f5be6e}.comp-ucl{--accent:#7db4ff}
+.comp-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:2px}.comp-name{color:var(--accent);font-weight:900;font-size:12px;letter-spacing:.08em;text-transform:uppercase}.comp-sub{color:var(--muted);font-size:12px}.comp-note{color:var(--accent);font-size:13px;font-weight:700;margin:4px 0 8px}
+.comp .fixture.compact{padding:8px 0;border-bottom:1px solid var(--line)}.comp .fixture.compact:last-of-type{border-bottom:0}.comp .fixture.compact .score{color:var(--accent);font-size:20px}
+.scorer-lines{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:2px;font-size:12px;color:var(--muted)}.scorer-lines>div{display:flex;flex-direction:column}.scorer-lines .away{text-align:right}.scorer-lines b{color:var(--text);font-weight:700}
+button.copied{border-color:var(--green);color:var(--green)}
