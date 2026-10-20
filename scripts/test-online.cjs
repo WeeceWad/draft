@@ -271,6 +271,56 @@ const finishSeason = (state, uid = 'a') => { for (let guard = 0; guard < 400 && 
   assert.deepEqual(restored.league.fixtures, jan.league.fixtures, 'Seasons with a window replay exactly');
   assert(restored.league.teams[0].squad.some(player => player.id === newcomer.id));
 }
+// Champions League: 38-0's European Nights field, draw and eight nights, then two-legged knockouts and a final.
+for (const [count, competition] of [[2, 'friends'], [3, 'premier'], [8, 'friends']]) {
+  let ucl = lobby(count);
+  ucl = command(ucl, 'a', 'settings', { capacity: count, config: { ...config, devMode: true, europe: true, cup: count === 3, competition } });
+  ucl.members.forEach(member => { ucl = command(ucl, member.uid, 'ready', { ready: true }); });
+  ucl = command(ucl, 'a', 'start'); ucl = command(ucl, 'a', 'startLeague');
+  const europe = ucl.league.europe, managers = ucl.league.teams.filter(team => !team.club).map(team => team.id), byId = new Map(europe.teams.map(team => [team.id, team]));
+  assert.equal(europe.teams.length, 36); assert.equal(europe.fixtures.length, 144); assert.equal(europe.dates.length, 17);
+  assert.deepEqual([1, 2, 3, 4].map(pot => europe.teams.filter(team => team.pot === pot).length), [9, 9, 9, 9]);
+  assert(managers.every(id => byId.has(id)), 'Every manager enters');
+  for (const team of europe.teams) {
+    const games = europe.fixtures.filter(fixture => fixture.homeId === team.id || fixture.awayId === team.id), opponent = fixture => byId.get(fixture.homeId === team.id ? fixture.awayId : fixture.homeId);
+    assert.equal(games.length, 8); assert.equal(games.filter(fixture => fixture.homeId === team.id).length, 4, 'Four at home');
+    assert.equal(new Set(games.map(fixture => fixture.matchday)).size, 8, 'One game each night');
+    assert.equal(new Set(games.map(fixture => opponent(fixture).id)).size, 8, 'Eight different opponents');
+    for (let pot = 1; pot <= 4; pot++) assert.equal(games.filter(fixture => opponent(fixture).pot === pot).length, 2, 'Two opponents from each pot');
+  }
+  if (count < 8) for (const id of managers) assert(europe.fixtures.filter(fixture => fixture.homeId === id || fixture.awayId === id).every(fixture => byId.get(fixture.homeId === id ? fixture.awayId : fixture.homeId).association !== 'England'), 'Managers avoid English sides in the league phase');
+  for (const slot of ['man-city', 'liverpool']) if (byId.has(`euro:${slot}`)) assert(byId.get(`euro:${slot}`).squad.length === 11 && !/^Keeper \d/.test(byId.get(`euro:${slot}`).squad[0].name), 'English clubs field their real squads');
+  assert.equal(byId.get('euro:real-madrid').squad.length, 11);
+  // European nights with managers in them play live.
+  for (let guard = 0; guard < 80 && league.nextEvent(ucl.league) !== 'europe'; guard++) { ucl = command(ucl, 'a', 'playRound'); if (ucl.live) time = ucl.live.endsAt; }
+  const night = ucl.league.europe.step; ucl = command(ucl, 'a', 'playRound');
+  assert(ucl.live?.europe && ucl.live.step === night, 'A European night with managers is live');
+  assert(ucl.league.europe.fixtures.filter(fixture => fixture.matchday === night).every(fixture => fixture.result));
+  time = ucl.live.endsAt;
+  assert.equal(engine.unpack(engine.pack(ucl)).league.europe.step, ucl.league.europe.step, 'European progress survives a restart');
+  ucl = finishSeason(ucl);
+  const done = ucl.league.europe;
+  assert.equal(done.step, 17); assert(done.winnerId && byId.has(done.winnerId), 'The Champions League is played to a winner');
+  assert(league.euroTable(done).every(row => row.played === 8));
+  assert.deepEqual(done.ties.map(tie => tie.round).reduce((m, r) => (m[r] = (m[r] || 0) + 1, m), {}), { PO: 8, R16: 8, QF: 4, SF: 2, F: 1 });
+  const table = league.euroTable(done), rank = new Map(table.map(row => [row.id, row.rank]));
+  for (const tie of done.ties.filter(item => item.round === 'PO')) assert(rank.get(tie.aId) >= 9 && rank.get(tie.aId) <= 16 && rank.get(tie.bId) >= 17 && rank.get(tie.bId) <= 24, 'Play-offs pair 9th–16th with 17th–24th');
+  assert.deepEqual(done.ties.filter(item => item.round === 'R16').map(tie => rank.get(tie.aId)).sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8], 'The top eight go straight to the last 16');
+  for (const tie of done.ties) {
+    assert.equal(tie.legs.length, tie.round === 'F' ? 1 : 2);
+    const last = tie.legs.at(-1).result;
+    if (tie.round !== 'F') {
+      const first = tie.legs[0].result; assert.equal(tie.legs[0].homeId, tie.bId, 'The lower seed hosts the first leg');
+      assert.equal(tie.aggA, first.awayGoals + last.homeGoals); assert.equal(tie.aggB, first.homeGoals + last.awayGoals);
+    }
+    for (const leg of tie.legs) { const r = leg.result; assert.equal(r.homeScorers.length, r.homeGoals); assert.equal(r.awayScorers.length, r.awayGoals); }
+    if (last.penalties) assert(tie.aggA === tie.aggB && last.extraTime && last.penalties.home !== last.penalties.away);
+    else assert.notEqual(tie.aggA, tie.aggB);
+    assert.equal(tie.winnerId, tie.aggA > tie.aggB || (last.penalties && last.penalties.home > last.penalties.away) ? tie.aId : tie.bId);
+  }
+  assert.deepEqual(engine.unpack(engine.pack(ucl)).league.europe, done, 'The whole competition replays exactly');
+  assert(engine.finished(ucl));
+}
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');
 assert.throws(() => command(room, 'b', 'formation', { formation: '3-5-2' }), /fixed formation/);

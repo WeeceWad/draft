@@ -155,3 +155,5 @@ body.dragging,body.dragging *{cursor:grabbing!important}
 .tie-note{font-size:11px;color:var(--muted)}
 .cup-winner{border-color:#fdd835;background:radial-gradient(ellipse at 50% 0,#4a3f12,transparent 70%),var(--panel)}
 .pens{margin:6px 0 0;letter-spacing:.5px}
+.euro-table .zone-top td:first-child{box-shadow:inset 3px 0 #5fd38d}.euro-table .zone-mid td:first-child{box-shadow:inset 3px 0 #f5be6e}.euro-table .zone-out td{opacity:.6}
+@media(max-width:799px){.euro-wrap table{table-layout:fixed}.euro-wrap :is(th,td):nth-child(n+4):nth-child(-n+6){display:none}.euro-wrap :is(th,td):nth-child(2){width:52%;white-space:normal;overflow-wrap:anywhere}}

@@ -299,8 +299,9 @@
   function playedMatches(league) {
     const matches = [], cupRounds = league.cup?.rounds || [];
     const cupAt = round => cupRounds.filter((cupRound, index) => index < (league.cup?.round || 0) && cupRound.after === round).flatMap(cupRound => cupRound.ties.filter(tie => tie.result));
+    const euroAt = round => league.europe ? league.europe.dates.flatMap((date, step) => step < league.europe.step && date.after === round ? euroPlayed(league.europe, step) : []) : [];
     for (let round = 0; round <= roundCount(league); round++) {
-      matches.push(...cupAt(round));
+      matches.push(...cupAt(round), ...euroAt(round));
       matches.push(...league.fixtures.filter(fixture => fixture.round === round && fixture.result));
     }
     return matches;
@@ -407,10 +408,243 @@
     if (!final) rounds[cup.round + 1] = { ...rounds[cup.round + 1], ties: Array.from({ length: ties.length / 2 }, (_, index) => ({ id: `cup-${cup.round + 2}-${index + 1}`, homeId: ties[2 * index].winnerId, awayId: ties[2 * index + 1].winnerId, result: null, winnerId: null, bye: false })) };
     return { league: { ...league, cup: { ...cup, round: cup.round + 1, rounds, winnerId: final ? ties[0].winnerId : null } } };
   }
+  // ---- Champions League (optional): 38-0's "European Nights" in its draft form ----------------------
+  // 38-0's 2026/27 European field: id, name, association, pot, UEFA coefficient, strength, English, kit.
+  const EURO_CLUBS = [
+    ['psg', 'Paris Saint-Germain', 'France', 1, 118.5, 87, 0, '#0b1f3a'], ['real-madrid', 'Real Madrid', 'Spain', 1, 143.5, 91, 0, '#0a4ea2'], ['man-city', 'Manchester City', 'England', 1, 137.75, 88, 1, '#6cabdd'],
+    ['bayern', 'Bayern Munich', 'Germany', 1, 135.25, 90, 0, '#dc052d'], ['liverpool', 'Liverpool', 'England', 1, 125.5, 89, 1, '#c8102e'], ['inter', 'Inter Milan', 'Italy', 1, 116.25, 86, 0, '#0a52a0'],
+    ['chelsea', 'Chelsea', 'England', 1, 109, 86, 1, '#034694'], ['dortmund', 'Borussia Dortmund', 'Germany', 1, 106.75, 85, 0, '#f5d800'], ['barcelona', 'Barcelona', 'Spain', 1, 103.25, 89, 0, '#004d98'],
+    ['arsenal', 'Arsenal', 'England', 2, 98, 83, 1, '#ef0107'], ['leverkusen', 'Bayer Leverkusen', 'Germany', 2, 95.25, 80, 0, '#e32219'], ['atletico', 'Atlético Madrid', 'Spain', 2, 93.5, 82, 0, '#cb3524'],
+    ['benfica', 'Benfica', 'Portugal', 2, 87.75, 81, 0, '#e10600'], ['atalanta', 'Atalanta', 'Italy', 2, 82, 78, 0, '#1a6fb5'], ['villarreal', 'Villarreal', 'Spain', 2, 82, 77, 0, '#ffd95a'],
+    ['juventus', 'Juventus', 'Italy', 2, 74.25, 85, 0, '#1a1a1a'], ['frankfurt', 'Eintracht Frankfurt', 'Germany', 2, 74, 77, 0, '#e1000f'], ['brugge', 'Club Brugge', 'Belgium', 2, 71.75, 75, 0, '#0a53a8'],
+    ['tottenham', 'Tottenham Hotspur', 'England', 3, 70.25, 80, 1, '#13234b'], ['psv', 'PSV Eindhoven', 'Netherlands', 3, 69.25, 78, 0, '#ed1c24'], ['ajax', 'Ajax', 'Netherlands', 3, 67.25, 81, 0, '#d2122e'],
+    ['napoli', 'Napoli', 'Italy', 3, 61, 78, 0, '#12a0d7'], ['sporting', 'Sporting CP', 'Portugal', 3, 59, 78, 0, '#15803d'], ['olympiacos', 'Olympiacos', 'Greece', 3, 56.5, 74, 0, '#e30613'],
+    ['slavia', 'Slavia Prague', 'Czech Republic', 3, 51, 72, 0, '#d7141a'], ['bodo', 'Bodø/Glimt', 'Norway', 3, 49, 71, 0, '#f0c808'], ['marseille', 'Marseille', 'France', 3, 48, 78, 0, '#2faee0'],
+    ['copenhagen', 'Copenhagen', 'Denmark', 4, 44.875, 72, 0, '#16396b'], ['monaco', 'Monaco', 'France', 4, 41, 76, 0, '#e0162b'], ['galatasaray', 'Galatasaray', 'Turkey', 4, 38.25, 75, 0, '#a4123f'],
+    ['union-sg', 'Union Saint-Gilloise', 'Belgium', 4, 36, 71, 0, '#f5c518'], ['qarabag', 'Qarabağ', 'Azerbaijan', 4, 32, 69, 0, '#0a52a0'], ['bilbao', 'Athletic Bilbao', 'Spain', 4, 26.75, 76, 0, '#ee2523'],
+    ['newcastle', 'Newcastle United', 'England', 4, 23.039, 78, 1, '#1a1a1a'], ['pafos', 'Pafos', 'Cyprus', 4, 11.125, 68, 0, '#0a52a0'], ['kairat', 'Kairat', 'Kazakhstan', 4, 5.5, 67, 0, '#f0c808'],
+  ];
+  // 38-0's constants: ratings pulled 30% towards 80, drafted XIs' field 4 below listed strength, pots re-ranked by
+  // strength, and its tournament match model (win and draw odds from expected points, then a goals model).
+  const EURO = { anchor: 80, compression: .7, fieldAdjust: -4, strengthK: .048, winFloor: .05, winCap: .96, drawFloor: .04, drawGapDamp: .003, goalCap: 5, groupScale: .85, koScale: .55, lateScale: .45, koScore: .8, lateScore: .75 };
+  const EURO_LINEUP = [['GK', 'Keeper'], ['RB', 'Full Back'], ['CB', 'Centre Back'], ['CB', 'Centre Back'], ['LB', 'Full Back'], ['CDM', 'Holder'], ['CM', 'Midfielder'], ['CAM', 'Playmaker'], ['RW', 'Winger'], ['ST', 'Striker'], ['LW', 'Winger']];
+  const EURO_SCORER = { GK: 0, LB: 2, CB: 1, RB: 2, LWB: 2, RWB: 2, CDM: 3, CM: 8, CAM: 13, LM: 9, RM: 9, LW: 15, RW: 15, ST: 20 };
+  const EURO_ASSIST = { GK: 0, LB: 6, CB: 2, RB: 6, LWB: 8, RWB: 8, CDM: 5, CM: 10, CAM: 16, LM: 10, RM: 10, LW: 12, RW: 12, ST: 8 };
+  const EURO_ET_SCORER = { ST: 5, LW: 4, RW: 4, CAM: 3, CM: 2, LM: 2, RM: 2, CDM: 1, CB: 1, LB: 1, RB: 1, LWB: 1, RWB: 1, GK: 0 };
+  // Eight league-phase nights, then two-legged play-off, last-16, quarter- and semi-finals, and a one-off final.
+  const EURO_DATES = [...Array.from({ length: 8 }, (_, index) => ({ key: `MD${index + 1}`, name: `League phase · matchday ${index + 1}` })),
+    { key: 'PO-1', round: 'PO', leg: 1, name: 'Knockout play-off · first leg' }, { key: 'PO-2', round: 'PO', leg: 2, name: 'Knockout play-off · second leg' },
+    { key: 'R16-1', round: 'R16', leg: 1, name: 'Round of 16 · first leg' }, { key: 'R16-2', round: 'R16', leg: 2, name: 'Round of 16 · second leg' },
+    { key: 'QF-1', round: 'QF', leg: 1, name: 'Quarter-finals · first leg' }, { key: 'QF-2', round: 'QF', leg: 2, name: 'Quarter-finals · second leg' },
+    { key: 'SF-1', round: 'SF', leg: 1, name: 'Semi-finals · first leg' }, { key: 'SF-2', round: 'SF', leg: 2, name: 'Semi-finals · second leg' }, { key: 'F', round: 'F', leg: 1, name: 'Final' }];
+  const euroRating = value => EURO.anchor + (value - EURO.anchor) * EURO.compression;
+  const euroMod = (value, size) => (value % size + size) % size;
+  const genericSquad = (id, overall) => EURO_LINEUP.map(([position, label], index) => ({ id: `${id}:${index + 1}`, name: `${label} ${index + 1}`, position, positions: [position], rating: clamp(Math.round(overall) + index % 3 - 1, 40, 99) }));
+  // The field: managers take the English places from the lowest seed up (then the smallest clubs), the other
+  // English places keep their real squads from our data, everyone else fields 38-0's generic line-up.
+  function euroField(league, english = {}) {
+    const managers = league.teams.filter(isManagerTeam);
+    const order = [...EURO_CLUBS.filter(club => club[6]).sort((a, b) => a[4] - b[4]), ...EURO_CLUBS.filter(club => !club[6]).sort((a, b) => a[4] - b[4])];
+    const slots = new Map(order.slice(0, managers.length).map((club, index) => [club[0], managers[index]]));
+    const teams = EURO_CLUBS.map(([slot, name, association, pot, coeff, strength, isEnglish, kit]) => {
+      const manager = slots.get(slot);
+      if (manager) return { id: manager.id, name: manager.name, association: 'England', pot, coeff, raw: manager.overall, slot };
+      const id = `euro:${slot}`, overall = euroRating(strength + EURO.fieldAdjust), squad = english[slot]?.squad?.length === 11 ? english[slot].squad : genericSquad(id, overall);
+      return { id, name, association, pot, coeff, raw: strength, club: true, strength, overall, kit, alternates: english[slot]?.alternates || [], formation: '4-3-3', squad };
+    });
+    [...teams].sort((a, b) => b.raw - a.raw || b.coeff - a.coeff || Number(!a.club) - Number(!b.club) || a.id.localeCompare(b.id)).forEach((team, index) => { team.pot = Math.min(4, Math.floor(index / 9) + 1); });
+    return teams;
+  }
+  // 38-0's draw: each team meets one side from every pot at home and one away, managers avoid their own association.
+  function euroDraw(teams, seed, managerIds) {
+    const byId = new Map(teams.map(team => [team.id, team])), clash = (a, b) => byId.get(a).association === byId.get(b).association;
+    const once = attempt => {
+      const random = seeded(hash(seed, `euro-draw:${attempt}`)), pots = [[], [], [], []];
+      for (const team of teams) pots[team.pot - 1].push(team);
+      for (const pot of pots) { pot.sort((a, b) => b.coeff - a.coeff || a.id.localeCompare(b.id)); for (let a = pot.length - 1; a > 0; a--) { const t = Math.floor(random() * (a + 1)); [pot[a], pot[t]] = [pot[t], pot[a]]; } }
+      const index = new Map(); pots.forEach(pot => pot.forEach((team, position) => index.set(team.id, position)));
+      const offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], pick = () => 1 + Math.floor(8 * random());
+      for (let e = 0; e < 4; e++) offsets[e][e] = pick();
+      for (let e = 0; e < 4; e++) for (let a = e + 1; a < 4; a++) { offsets[e][a] = pick(); let t = pick(); while (euroMod(offsets[e][a] + t, 9) === 0) t = t % 8 + 1; offsets[a][e] = t; }
+      return teams.flatMap(team => [0, 1, 2, 3].map(pot => ({ homeId: team.id, awayId: pots[pot][euroMod(index.get(team.id) + offsets[team.pot - 1][pot], 9)].id })));
+    };
+    const clashes = matches => matches.filter(match => (managerIds.includes(match.homeId) || managerIds.includes(match.awayId)) && clash(match.homeId, match.awayId)).length;
+    let best = null;
+    for (let attempt = 0; attempt < 400; attempt++) { const matches = once(attempt), count = clashes(matches); if (!count) return matches; if (!best || count < best.count) best = { matches, count }; }
+    return best.matches;
+  }
+  // Eight nights with every team playing once a night (edge colouring with Kempe-chain repairs).
+  function euroNights(teams, matches, seed) {
+    const ids = new Map(teams.map((team, index) => [team.id, index]));
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const random = seeded(hash(seed, `euro-nights:${attempt}`)), colour = new Array(matches.length).fill(-1), at = teams.map(() => new Array(8).fill(-1));
+      const ends = matches.map(match => [ids.get(match.homeId), ids.get(match.awayId)]);
+      const set = (m, c) => { colour[m] = c; at[ends[m][0]][c] = m; at[ends[m][1]][c] = m; }, unset = m => { const c = colour[m]; at[ends[m][0]][c] = -1; at[ends[m][1]][c] = -1; colour[m] = -1; };
+      const order = matches.map((_, index) => index); for (let a = order.length - 1; a > 0; a--) { const t = Math.floor(random() * (a + 1)); [order[a], order[t]] = [order[t], order[a]]; }
+      let failed = false;
+      for (const m of order) {
+        const [u, v] = ends[m], free = node => [0, 1, 2, 3, 4, 5, 6, 7].filter(day => at[node][day] < 0);
+        let day = free(u).find(value => at[v][value] < 0);
+        for (const a of day === undefined ? free(u) : []) {
+          for (const b of free(v)) {
+            const path = []; let node = v, want = a;
+            for (let guard = 0; guard < 80; guard++) { const edge = at[node][want]; if (edge < 0) break; path.push(edge); node = ends[edge][0] === node ? ends[edge][1] : ends[edge][0]; want = want === a ? b : a; }
+            if (path.some(edge => ends[edge].includes(u))) continue;
+            const colours = path.map(edge => colour[edge]); path.forEach(unset); path.forEach((edge, index) => set(edge, colours[index] === a ? b : a));
+            if (at[u][a] < 0 && at[v][a] < 0) { day = a; break; }
+          }
+          if (day !== undefined) break;
+        }
+        if (day === undefined) { failed = true; break; }
+        set(m, day);
+      }
+      if (!failed) return colour;
+    }
+    return matches.map((_, index) => index % 8);
+  }
+  function drawEurope(league, english = {}) {
+    const teams = euroField(league, english), managerIds = league.teams.filter(isManagerTeam).map(team => team.id), seed = hash(league.seed, 'champions-league');
+    const matches = euroDraw(teams, seed, managerIds), nights = euroNights(teams, matches, seed), leagueRounds = roundCount(league);
+    const fixtures = matches.map((match, index) => ({ ...match, matchday: nights[index] })).sort((a, b) => a.matchday - b.matchday || a.homeId.localeCompare(b.homeId)).map((match, index) => ({ id: `ucl-${match.matchday + 1}-${index + 1}`, ...match, result: null }));
+    const dates = EURO_DATES.map((date, index) => ({ ...date, after: clamp(Math.floor(leagueRounds * (index + 1) / (EURO_DATES.length + 1)), 1, leagueRounds) }));
+    return { name: 'Champions League', teams, fixtures, dates, step: 0, ties: [], winnerId: null };
+  }
+  // ---- 38-0's tournament match model --------------------------------------------------------------
+  function euroPlan(own, opponent) {
+    const perGame = targetPoints(own) / 38;
+    let draw = clamp(.26 - (perGame - 1) * .1, .05, .28), win = clamp((perGame - draw) / 3, .02, .97);
+    win = Math.min(.97, win + .012 * Math.max(0, own - 88)); draw = Math.min(draw, 1 - win);
+    const odds = clamp(win - (opponent - 80) * EURO.strengthK, EURO.winFloor, EURO.winCap);
+    return { win: odds, draw: Math.min(draw, 1 - odds) };
+  }
+  const euroGoals = (own, opponent) => (clamp(-129 + 2.4 * own, 18, 90) / 38 + clamp(248.8 - 2.53 * opponent, 20, 100) / 38) / 2;
+  const euroPick = (squad, weights, random, skip = null) => { const options = squad.filter(player => player.id !== skip), values = options.map(player => (weights[player.position] ?? 4) * Math.pow(Math.max(40, player.rating) / 80, 2)); return pickWeighted(options, (_, index) => values[index], random()) || options[0]; };
+  function euroScorers(team, count, random, first, last, extra = false) {
+    return Array.from({ length: count }, () => {
+      const scorer = extra ? pickWeighted(team.squad, player => EURO_ET_SCORER[player.position] ?? 1, random()) : euroPick(team.squad, EURO_SCORER, random);
+      const assist = random() < .22 ? null : euroPick(team.squad, EURO_ASSIST, random, scorer.id);
+      return { minute: first + Math.floor(random() * (last + 1 - first)), playerId: scorer.id, name: scorer.name, ...(assist ? { assistId: assist.id, assistName: assist.name } : {}), ...(extra ? { extra: true } : {}) };
+    });
+  }
+  function euroShootout(home, away, random) {
+    const chance = team => clamp(clamp(.7 + (team.overall - 80) * .005, .55, .9), .5, .93), takers = team => team.squad.filter(player => player.position !== 'GK').sort((a, b) => (scorerWeights[b.position] || 0) * b.rating - (scorerWeights[a.position] || 0) * a.rating || b.rating - a.rating);
+    const order = { home: takers(home), away: takers(away) }, odds = { home: chance(home), away: chance(away) }, score = { home: 0, away: 0 }, taken = { home: 0, away: 0 }, kicks = [];
+    const kick = side => { const taker = order[side][taken[side] % order[side].length], scored = random() < odds[side]; taken[side]++; if (scored) score[side]++; kicks.push({ side, name: taker?.name || 'Penalty taker', scored }); };
+    let side = 'home';
+    while ((taken.home < 5 || taken.away < 5) && !(score.home > score.away + (5 - taken.away)) && !(score.away > score.home + (5 - taken.home))) { if (taken[side] < 5) kick(side); side = side === 'home' ? 'away' : 'home'; }
+    while (score.home === score.away) { kick('home'); kick('away'); }
+    return { home: score.home, away: score.away, kicks };
+  }
+  // One match: the result first (from both sides' odds), then goals; a knockout draw goes to extra time and penalties.
+  function euroMatch(home, away, seed, { knockout = false, late = false } = {}) {
+    const random = seeded(seed), own = home.overall, opponent = away.overall, a = euroPlan(own, opponent), b = euroPlan(opponent, own);
+    const draw = Math.max(EURO.drawFloor, (a.draw + b.draw) / 2 - Math.abs(own - opponent) * EURO.drawGapDamp), total = a.win + b.win + draw || 1;
+    const roll = random(), outcome = roll < a.win / total ? 'home' : roll < (a.win + draw) / total ? 'draw' : 'away';
+    const scale = knockout ? (late ? EURO.lateScale : EURO.koScale) : EURO.groupScale;
+    let homeGoals = Math.min(EURO.goalCap, poisson(euroGoals(own, opponent) * scale, random)), awayGoals = Math.min(EURO.goalCap, poisson(euroGoals(opponent, own) * scale, random));
+    if (knockout && outcome !== 'draw') {
+      const again = seeded(hash(seed, 'ko-scoreline')), size = late ? EURO.lateScore : EURO.koScore; let found = false;
+      for (let attempt = 0; attempt < 64 && !found; attempt++) { const h = Math.min(EURO.goalCap, poisson(euroGoals(own, opponent) * size, again)), g = Math.min(EURO.goalCap, poisson(euroGoals(opponent, own) * size, again)); if (outcome === 'home' ? h > g : g > h) { homeGoals = h; awayGoals = g; found = true; } }
+      if (!found) [homeGoals, awayGoals] = outcome === 'home' ? [1, 0] : [0, 1];
+    } else if (outcome === 'home' && homeGoals <= awayGoals) { if (homeGoals >= 1) awayGoals = homeGoals - 1; else homeGoals = awayGoals + 1; }
+    else if (outcome === 'away' && awayGoals <= homeGoals) { if (awayGoals >= 1) homeGoals = awayGoals - 1; else awayGoals = homeGoals + 1; }
+    else if (outcome === 'draw') homeGoals = awayGoals = Math.round((homeGoals + awayGoals) / 2);
+    const result = { homeGoals, awayGoals, homeScorers: euroScorers(home, homeGoals, random, 1, 90), awayScorers: euroScorers(away, awayGoals, random, 1, 90) };
+    separate(result.homeScorers, result.awayScorers);
+    if (!knockout || outcome !== 'draw') return result;
+    const extraHome = Math.min(EURO.goalCap, poisson(euroGoals(own, opponent) * (30 / 90) * scale, random)), extraAway = Math.min(EURO.goalCap, poisson(euroGoals(opponent, own) * (30 / 90) * scale, random));
+    return finishExtra(result, home, away, extraHome, extraAway, random, result.homeGoals + extraHome === result.awayGoals + extraAway, false);
+  }
+  // Extra time on top of a result (in a second leg the scorers follow 38-0's simpler role weights), then penalties if still level.
+  function finishExtra(result, home, away, extraHome, extraAway, random, level, legWeights) {
+    const homeExtra = euroScorers(home, extraHome, random, 91, 120, legWeights), awayExtra = euroScorers(away, extraAway, random, 91, 120, legWeights);
+    const used = new Set(); for (const goal of [...homeExtra, ...awayExtra].sort((x, y) => x.minute - y.minute)) { while (used.has(goal.minute) && goal.minute < 120) goal.minute++; while (used.has(goal.minute)) goal.minute--; used.add(goal.minute); goal.extra = true; }
+    const out = { ...result, homeGoals: result.homeGoals + extraHome, awayGoals: result.awayGoals + extraAway, homeScorers: [...result.homeScorers, ...homeExtra.sort(goalOrder)], awayScorers: [...result.awayScorers, ...awayExtra.sort(goalOrder)], extraTime: { home: extraHome, away: extraAway } };
+    if (level) out.penalties = euroShootout(home, away, random);
+    return out;
+  }
+  // ---- The competition as it runs through the season -----------------------------------------------
+  function euroTable(europe) {
+    const rows = new Map(europe.teams.map(team => [team.id, { id: team.id, name: team.name, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0, awayWins: 0, awayGoals: 0, coeff: team.coeff }]));
+    for (const fixture of europe.fixtures) if (fixture.result) {
+      const home = rows.get(fixture.homeId), away = rows.get(fixture.awayId), r = fixture.result;
+      home.played++; away.played++; home.gf += r.homeGoals; home.ga += r.awayGoals; away.gf += r.awayGoals; away.ga += r.homeGoals; away.awayGoals += r.awayGoals;
+      if (r.homeGoals > r.awayGoals) { home.won++; home.points += 3; away.lost++; } else if (r.homeGoals < r.awayGoals) { away.won++; away.awayWins++; away.points += 3; home.lost++; } else { home.drawn++; away.drawn++; home.points++; away.points++; }
+    }
+    for (const row of rows.values()) row.gd = row.gf - row.ga;
+    return [...rows.values()].sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf || b.awayGoals - a.awayGoals || b.won - a.won || b.awayWins - a.awayWins || b.coeff - a.coeff || a.id.localeCompare(b.id)).map((row, index) => ({ ...row, rank: index + 1 }));
+  }
+  // The games on the next (or a given) European night.
+  function euroTonight(europe, step = europe.step) {
+    const date = europe.dates[step]; if (!date) return [];
+    if (!date.round) return europe.fixtures.filter(fixture => fixture.matchday === step);
+    return europe.ties.filter(tie => tie.round === date.round).map(tie => ({ id: `${tie.id}-${date.leg}`, tieId: tie.id, ...(date.leg === 1 && tie.round !== 'F' ? { homeId: tie.bId, awayId: tie.aId } : { homeId: tie.aId, awayId: tie.bId }), result: tie.legs[date.leg - 1]?.result || null, leg: date.leg, round: tie.round }));
+  }
+  const euroNightHasManager = (league, step) => euroTonight(league.europe, step).some(match => [match.homeId, match.awayId].some(id => isManagerTeam(league.teams.find(item => item.id === id) || { club: true })));
+  // A team as it plays tonight: managers at their current (form-adjusted) strength, compressed like 38-0's field;
+  // in the last 16 the league-phase ranking gives a small edge (1st +2.5, 2nd–4th +2, 5th–8th +1, 9th–24th +0.5).
+  function euroSide(league, teams, id, bonus = 0) {
+    const club = league.europe.teams.find(team => team.id === id);
+    if (club?.club) return { ...club, overall: club.overall + bonus };
+    const team = teams.get(id); return { ...team, overall: euroRating(team.overall) + bonus };
+  }
+  function euroTies(europe, round, seed) {
+    const table = euroTable(europe), team = rank => table[rank - 1].id, random = seeded(hash(seed, 'euro-bracket')), coin = Array.from({ length: 8 }, () => random() < .5);
+    const tie = (id, aId, bId, slot) => ({ id, round, aId, bId, slot, legs: [], winnerId: null });
+    if (round === 'PO') return [[9, 10, 23, 24], [11, 12, 21, 22], [13, 14, 19, 20], [15, 16, 17, 18]].flatMap(([a, b, c, d], index) => [tie(`ucl-po-${a}`, team(a), team(coin[index] ? d : c), a), tie(`ucl-po-${b}`, team(b), team(coin[index] ? c : d), b)]);
+    if (round === 'R16') {
+      const winners = europe.ties.filter(item => item.round === 'PO').sort((a, b) => a.slot - b.slot).map(item => item.winnerId), pairs = new Map();
+      for (let e = 0; e < 4; e++) { const [n, o] = [winners[6 - 2 * e], winners[7 - 2 * e]], swap = coin[4 + e]; pairs.set(2 * e + 1, swap ? o : n); pairs.set(2 * e + 2, swap ? n : o); }
+      return [1, 8, 3, 5, 2, 7, 4, 6].map(rank => tie(`ucl-r16-${rank}`, team(rank), pairs.get(rank), rank));
+    }
+    const previous = europe.ties.filter(item => item.round === { QF: 'R16', SF: 'QF', F: 'SF' }[round]), next = [];
+    for (let index = 0; index < previous.length; index += 2) {
+      const a = previous[index], b = previous[index + 1], first = a.slot <= b.slot;
+      next.push(tie(`ucl-${round.toLowerCase()}-${index / 2 + 1}`, first ? a.winnerId : b.winnerId, first ? b.winnerId : a.winnerId, Math.min(a.slot, b.slot)));
+    }
+    return next;
+  }
+  function playEuroNight(league) {
+    const europe = league.europe; if (!europe || europe.step >= europe.dates.length) return { error: 'The Champions League is finished.' };
+    const date = europe.dates[europe.step], teams = formedTeams(league), seed = hash(league.seed, 'champions-league');
+    let next = { ...europe, fixtures: europe.fixtures, ties: europe.ties.slice() };
+    if (!date.round) {
+      next.fixtures = europe.fixtures.map(fixture => fixture.matchday !== europe.step ? fixture : { ...fixture, result: euroMatch(euroSide(league, teams, fixture.homeId), euroSide(league, teams, fixture.awayId), hash(seed, fixture.id)) });
+    } else {
+      if (date.leg === 1) next.ties = [...next.ties, ...euroTies(next, date.round, seed)];
+      const ranks = new Map(euroTable(next).map(row => [row.id, row.rank])), bonus = id => date.round !== 'R16' ? 0 : (rank => rank === 1 ? 2.5 : rank <= 4 ? 2 : rank <= 8 ? 1 : rank <= 24 ? .5 : 0)(ranks.get(id) ?? 36);
+      next.ties = next.ties.map(tie => {
+        if (tie.round !== date.round) return tie;
+        const a = euroSide(league, teams, tie.aId, bonus(tie.aId)), b = euroSide(league, teams, tie.bId, bonus(tie.bId));
+        if (date.round === 'F') {
+          const result = euroMatch(a, b, hash(seed, tie.id), { knockout: true, late: true }), aWins = result.homeGoals > result.awayGoals || (result.penalties && result.penalties.home > result.penalties.away);
+          return { ...tie, legs: [{ homeId: tie.aId, awayId: tie.bId, result }], aggA: result.homeGoals, aggB: result.awayGoals, winnerId: aWins ? tie.aId : tie.bId };
+        }
+        if (date.leg === 1) return { ...tie, legs: [{ homeId: tie.bId, awayId: tie.aId, result: euroMatch(b, a, hash(seed, `${tie.id}:1`)) }] };
+        // Second leg at the higher seed; level on aggregate means 30 more minutes, then penalties.
+        const first = tie.legs[0].result, random = seeded(hash(seed, `${tie.id}:2:extra`));
+        let result = euroMatch(a, b, hash(seed, `${tie.id}:2`));
+        let aggA = first.awayGoals + result.homeGoals, aggB = first.homeGoals + result.awayGoals;
+        if (aggA === aggB) {
+          const extraA = poisson(euroGoals(a.overall, b.overall) * (30 / 90) * .45, random), extraB = poisson(euroGoals(b.overall, a.overall) * (30 / 90) * .45, random);
+          result = finishExtra(result, a, b, extraA, extraB, random, aggA + extraA === aggB + extraB, true);
+          aggA += extraA; aggB += extraB;
+        }
+        const aWins = aggA > aggB || (aggA === aggB && result.penalties && result.penalties.home > result.penalties.away);
+        return { ...tie, legs: [...tie.legs, { homeId: tie.aId, awayId: tie.bId, result: { ...result, aggregate: { home: aggA, away: aggB } } }], aggA, aggB, winnerId: aWins ? tie.aId : tie.bId };
+      });
+    }
+    next.step = europe.step + 1;
+    if (date.round === 'F') next.winnerId = next.ties.find(tie => tie.round === 'F').winnerId;
+    return { league: { ...league, europe: next } };
+  }
+  // Every played European match, for form.
+  const euroPlayed = (europe, step) => euroTonight(europe, step).filter(match => match.result);
   const cupTies = league => league.cup && league.cup.round < league.cup.rounds.length ? league.cup.rounds[league.cup.round].ties : [];
   // What happens next: a cup round once its league point is reached, then the January window, then league football.
   function nextEvent(league) {
     if (league.cup && league.cup.round < league.cup.rounds.length && league.round >= league.cup.rounds[league.cup.round].after) return 'cup';
+    if (league.europe && league.europe.step < league.europe.dates.length && league.round >= league.europe.dates[league.europe.step].after) return 'europe';
     if (league.window && !league.window.done && league.round >= league.window.after) return 'window';
     if (league.round < roundCount(league)) return 'league';
     return null;
@@ -418,6 +652,7 @@
   const eventHasDerby = league => {
     const event = nextEvent(league);
     if (event === 'cup') return cupTies(league).some(tie => managerTie(league, tie));
+    if (event === 'europe') return euroNightHasManager(league, league.europe.step);
     if (event === 'league') return league.fixtures.some(fixture => fixture.round === league.round && managerDerby(league, fixture));
     return false;
   };
@@ -425,6 +660,7 @@
   function advance(league) {
     const event = nextEvent(league);
     if (event === 'cup') return playCupRound(league);
+    if (event === 'europe') return playEuroNight(league);
     if (event === 'league') return playRound(league);
     return { error: event === 'window' ? 'Open the January transfer window first.' : 'The season is finished.' };
   }
@@ -471,7 +707,7 @@
     for (const id of Object.keys(started.league.pending.firstHalf)) { const fixture = league.fixtures.find(item => item.id === id); changes[id] = { home: autoChanges(teams.get(fixture.homeId)), away: autoChanges(teams.get(fixture.awayId)) }; }
     return finishRound(started.league, changes);
   }
-  function create(game, seed = Math.floor(Math.random() * 4294967296), { clubs = [] } = {}) {
+  function create(game, seed = Math.floor(Math.random() * 4294967296), { clubs = [], europe = {} } = {}) {
     const check = readiness(game);
     if (!check.ready) return { error: check.message };
     if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) return { error: 'Invalid league seed.' };
@@ -480,6 +716,7 @@
       form: !!game.config.form, startBoards: Object.fromEntries(game.managers.map(manager => [manager.id, manager.board.slice()])) };
     if (clubs.length) league.planned = plan(league);
     if (game.config.cup) league.cup = drawCup(league);
+    if (game.config.europe) league.europe = drawEurope(league, europe);
     if (game.config.january) league.window = { after: Math.floor(roundCount(league) / 2), done: false };
     return { league };
   }
@@ -533,9 +770,9 @@
     return { biggestBuy, bargain, biggestSpender };
   }
   function serialise(league) {
-    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', ...(league.subs ? { subs: league.subs, pending: league.pending ? { round: league.pending.round, changes: league.pending.changes, ready: league.pending.ready } : null } : {}), boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: league.startBoards?.[team.id] || team.board })), cupRound: league.cup?.round || 0, window: league.window?.done ? league.window.boards : null } : null;
+    return league ? { version: league.version, engineVersion: league.engineVersion, seed: league.seed, round: league.round, competition: league.competition || 'friends', ...(league.subs ? { subs: league.subs, pending: league.pending ? { round: league.pending.round, changes: league.pending.changes, ready: league.pending.ready } : null } : {}), boards: league.teams.filter(isManagerTeam).map(team => ({ id: team.id, board: league.startBoards?.[team.id] || team.board })), cupRound: league.cup?.round || 0, euroStep: league.europe?.step || 0, window: league.window?.done ? league.window.boards : null } : null;
   }
-  function restore(saved, game, { clubs = [] } = {}) {
+  function restore(saved, game, { clubs = [], europe = {} } = {}) {
     try {
       if (!saved || saved.version !== 1 || !VERSIONS.includes(saved.engineVersion) || !Number.isInteger(saved.round)) return null;
       if ((saved.competition || 'friends') !== (clubs.length ? 'premier' : 'friends')) return null;
@@ -546,7 +783,7 @@
         if (!board || board.length !== 11 || board.some(id => !owned.has(id))) return null;
       }
       const startGame = { ...game, phase: 'complete', managers: game.managers.map(manager => ({ ...manager, board: startBoards[manager.id].slice() })) };
-      let league = create(startGame, saved.seed, { clubs }).league;
+      let league = create(startGame, saved.seed, { clubs, europe }).league;
       if (!league || saved.round < 0 || saved.round > roundCount(league)) return null;
       // Starting snapshots leave out January signings, who join the squads only when the window closes.
       league = { ...league, teams: league.teams.map(item => item.club ? item : team(startGame, startGame.managers.find(manager => manager.id === item.id), { january: false })) };
@@ -559,15 +796,16 @@
       for (let guard = 0; guard < 200; guard++) {
         const event = nextEvent(league);
         if (event === 'cup' && league.cup.round < (saved.cupRound || 0)) league = playCupRound(league).league;
+        else if (event === 'europe' && league.europe.step < (saved.euroStep || 0)) league = playEuroNight(league).league;
         else if (event === 'window' && saved.window) league = applyWindow(league, game, saved.window).league;
         else if (event === 'league' && league.round < saved.round) league = playLeagueRound();
         else break;
       }
-      if (league.round !== saved.round || (league.cup?.round || 0) !== (saved.cupRound || 0)) return null;
+      if (league.round !== saved.round || (league.cup?.round || 0) !== (saved.cupRound || 0) || (league.europe?.step || 0) !== (saved.euroStep || 0)) return null;
       if (league.subs && saved.pending) { if (saved.pending.round !== saved.round) return null; league = startRound(league).league; league.pending.changes = saved.pending.changes || {}; league.pending.ready = saved.pending.ready || {}; }
       return league;
     } catch { return null; }
   }
-  const api = { VERSION, formTable, formOf, formed, FORM_NEUTRAL, FORM_EFFECT, drawCup, playCupRound, cupTies, nextEvent, eventHasDerby, advance, applyWindow, shootout, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, managerTie, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
+  const api = { VERSION, formTable, formOf, formed, FORM_NEUTRAL, FORM_EFFECT, drawCup, playCupRound, cupTies, EURO_CLUBS, drawEurope, playEuroNight, euroTable, euroTonight, euroMatch, nextEvent, eventHasDerby, advance, applyWindow, shootout, FATIGUE, DRAIN, staminaAt, secondHalfRating, lineupAfter, secondHalfTeam, autoChanges, startRound, finishRound, SEASON, basePlan, fixtureOdds, seasonAgainstClubs, managerDerby, managerTie, nextDerbyRound, isManagerTeam, absoluteMinute, minuteLabel, goalTime, naturalRank, fitMultiplier, team, readiness, schedule, seeded, poisson, expectedGoals, simulateMatch, create, roundCount, playRound, table, awards, serialise, restore };
   if (typeof module !== 'undefined') module.exports = api; else scope.LeagueCore = api;
 })(globalThis);

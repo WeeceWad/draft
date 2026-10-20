@@ -16,25 +16,40 @@ function premierClubs(game) {
   return clubCache.get(key);
 }
 function buildClubs(game) {
-  const taken = new Set(game.pool.filter(entry => !entry.january).map(entry => entry.id)), slots = draft.formations['4-3-3'];
-  return FIELD.slice(0, 20 - game.managers.length).map(([name, strength, clubId]) => {
-    const counts = new Map();
-    for (const player of players) for (const season of player.clubSeasons) if (season.clubId === clubId) counts.set(season.season, (counts.get(season.season) || 0) + 1);
-    const latest = [...counts.keys()].sort().reverse().find(season => counts.get(season) >= 14);
-    const options = players.filter(player => !taken.has(player.id)).flatMap(player => { const season = player.clubSeasons.find(item => item.clubId === clubId && item.season === latest); return season ? [{ player, rating: season.seasonRating }] : []; }).sort((a, b) => b.rating - a.rating || a.player.id.localeCompare(b.player.id));
-    const used = new Set();
-    const squad = slots.map(slot => {
-      const pick = options.find(option => !used.has(option.player.id) && (slot.position === 'GK' ? option.player.positions.includes('GK') : !option.player.positions.includes('GK') && draft.fits(option.player, slot.position)))
-        || options.find(option => !used.has(option.player.id) && (slot.position === 'GK') === option.player.positions.includes('GK'));
-      if (!pick) return null;
-      used.add(pick.player.id);
-      return { id: pick.player.id, name: pick.player.name, position: slot.position, positions: pick.player.positions.slice(), rating: pick.rating };
-    }).filter(Boolean);
-    const club = clubMap.get(clubId);
-    return { id: `club:${clubId}`, name, strength, season: latest, squad, kit: club?.color || '#ffffff', alternates: [club?.secondaryColor, club?.thirdColor].filter(Boolean) };
-  });
+  const taken = new Set(game.pool.filter(entry => !entry.january).map(entry => entry.id));
+  return FIELD.slice(0, 20 - game.managers.length).map(([name, strength, clubId]) => clubSquad(taken, name, strength, clubId));
+}
+function clubSquad(taken, name, strength, clubId) {
+  const slots = draft.formations['4-3-3'];
+  const counts = new Map();
+  for (const player of players) for (const season of player.clubSeasons) if (season.clubId === clubId) counts.set(season.season, (counts.get(season.season) || 0) + 1);
+  const latest = [...counts.keys()].sort().reverse().find(season => counts.get(season) >= 14);
+  const options = players.filter(player => !taken.has(player.id)).flatMap(player => { const season = player.clubSeasons.find(item => item.clubId === clubId && item.season === latest); return season ? [{ player, rating: season.seasonRating }] : []; }).sort((a, b) => b.rating - a.rating || a.player.id.localeCompare(b.player.id));
+  const used = new Set();
+  const squad = slots.map(slot => {
+    const pick = options.find(option => !used.has(option.player.id) && (slot.position === 'GK' ? option.player.positions.includes('GK') : !option.player.positions.includes('GK') && draft.fits(option.player, slot.position)))
+      || options.find(option => !used.has(option.player.id) && (slot.position === 'GK') === option.player.positions.includes('GK'));
+    if (!pick) return null;
+    used.add(pick.player.id);
+    return { id: pick.player.id, name: pick.player.name, position: slot.position, positions: pick.player.positions.slice(), rating: pick.rating };
+  }).filter(Boolean);
+  const club = clubMap.get(clubId);
+  return { id: `club:${clubId}`, name, strength, season: latest, squad, kit: club?.color || '#ffffff', alternates: [club?.secondaryColor, club?.thirdColor].filter(Boolean) };
+}
+// Champions League: the English clubs in 38-0's European field play with their real latest squads from our data.
+const EURO_ENGLISH = { 'man-city': 'manchester-city', liverpool: 'liverpool', chelsea: 'chelsea', arsenal: 'arsenal', tottenham: 'tottenham', newcastle: 'newcastle' };
+const europeCache = new Map();
+function europeSquads(game) {
+  const key = game.pool.filter(entry => !entry.january).map(entry => entry.id).join(',');
+  if (!europeCache.has(key)) {
+    if (europeCache.size > 50) europeCache.clear();
+    const taken = new Set(game.pool.filter(entry => !entry.january).map(entry => entry.id));
+    europeCache.set(key, Object.fromEntries(Object.entries(EURO_ENGLISH).map(([slot, clubId]) => [slot, clubSquad(taken, slot, 0, clubId)])));
+  }
+  return europeCache.get(key);
 }
 const clubsFor = room => room.config.competition === 'premier' && room.game ? premierClubs(room.game) : [];
+const europeFor = room => room.config.europe && room.game ? europeSquads(room.game) : {};
 class RoomError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 const fail = (message, status) => { throw new RoomError(message, status); };
 function name(value) {
@@ -44,7 +59,7 @@ function name(value) {
 function settings(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) fail('Choose between 2 and 8 managers.');
   const config = { managerCount: capacity, names: Array.from({ length: capacity }, (_, i) => `Manager ${i + 1}`), formation: input.formation,
-    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, subs: input.subs === true, form: input.form === true, cup: input.cup === true, january: input.january === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
+    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, subs: input.subs === true, form: input.form === true, cup: input.cup === true, europe: input.europe === true, january: input.january === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
   if (!draft.poolShape(config.formation) || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
     || config.seasonFrom > config.seasonTo || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax)
     || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax) fail('Choose valid formation, seasons and ratings.');
@@ -68,7 +83,7 @@ function unpack(record) {
     if (!room.game) fail('This saved room cannot be loaded.', 500);
   }
   if (room.league) {
-    room.league = leagueCore.restore(room.league, room.game, { clubs: clubsFor(room) });
+    room.league = leagueCore.restore(room.league, room.game, { clubs: clubsFor(room), europe: europeFor(room) });
     if (!room.league) fail('This saved league cannot be loaded.', 500);
   }
   return room;
@@ -283,7 +298,7 @@ function apply(room, uid, command, now) {
       host(room, uid);
       if (!room.game || room.status !== 'complete') fail('Finish the auction before starting the league.', 409);
       if (room.league) fail('The league has already started.', 409);
-      const result = leagueCore.create(room.game, (room.seed ^ 0x52ff8844) >>> 0, { clubs: clubsFor(room) });
+      const result = leagueCore.create(room.game, (room.seed ^ 0x52ff8844) >>> 0, { clubs: clubsFor(room), europe: europeFor(room) });
       if (result.error) fail(result.error);
       room.league = result.league; break;
     }
@@ -312,6 +327,15 @@ function apply(room, uid, command, now) {
         const to = ties.some(tie => tie.result.extraTime) ? 127 : 97, kicks = Math.max(0, ...ties.map(tie => tie.result.penalties?.kicks.length || 0));
         const pensMs = kicks ? PEN_INTRO_MS + kicks * PEN_KICK_MS : 0;
         room.live = derby ? { cup: true, cupRound, round: room.league.round, startsAt: now, endsAt: now + Math.round(LIVE_MS[view] * to / 97) + pensMs, view, from: 0, to, ...(pensMs ? { pensMs } : {}) } : null;
+        break;
+      }
+      if (event === 'europe') {
+        const step = room.league.europe.step;
+        room.league = leagueCore.playEuroNight(room.league).league;
+        const games = leagueCore.euroTonight(room.league.europe, step).filter(match => [match.homeId, match.awayId].some(id => room.league.teams.some(team => team.id === id && !team.club)));
+        const to = games.some(match => match.result.extraTime) ? 127 : 97, kicks = Math.max(0, ...games.map(match => match.result.penalties?.kicks.length || 0));
+        const pensMs = kicks ? PEN_INTRO_MS + kicks * PEN_KICK_MS : 0;
+        room.live = derby ? { europe: true, step, round: room.league.round, startsAt: now, endsAt: now + Math.round(LIVE_MS[view] * to / 97) + pensMs, view, from: 0, to, ...(pensMs ? { pensMs } : {}) } : null;
         break;
       }
       if (command.type === 'playRound' && derby && room.league.subs) {
@@ -448,7 +472,7 @@ function view(room, uid) {
     remainingCount: room.game.remaining.length, totalPlayers: room.game.pool.length };
   // Planned Premier League results stay on the server until each matchday is played.
   const league = room.league && { round: room.league.round, teams: room.league.teams, fixtures: room.league.fixtures, engineVersion: room.league.engineVersion, competition: room.league.competition || 'friends', nextDerby: leagueCore.nextDerbyRound(room.league), subs: !!room.league.subs, pending: room.league.pending || null,
-    form: !!room.league.form, cup: room.league.cup || null, window: room.league.window ? { after: room.league.window.after, done: room.league.window.done } : null, nextEvent: leagueCore.nextEvent(room.league) };
+    form: !!room.league.form, cup: room.league.cup || null, europe: room.league.europe || null, window: room.league.window ? { after: room.league.window.after, done: room.league.window.done } : null, nextEvent: leagueCore.nextEvent(room.league) };
   return { id: room.id, code: room.code, capacity: room.capacity, config: room.config, status: room.status, revision: room.revision, expiresAt: room.expiresAt,
     isHost: room.hostUid === uid, me: me.managerId, preview: room.config.competition === 'premier' && room.game && !room.league ? premierClubs(room.game).map(club => ({ name: club.name, strength: club.strength })) : null, showRatings: room.showRatings !== false, finished: finished(room), next: room.next || null, live: room.live || null, matchView: room.matchView === 'pitch' ? 'pitch' : 'classic',
     keepers: room.game ? room.game.managers.filter(manager => hasKeeper(room, manager.id)).map(manager => manager.id) : [], members: room.members.map(member => ({ managerId: member.managerId, name: member.name, ready: member.ready, isHost: member.uid === room.hostUid, kit: member.kit || null })), window: room.window || null, game, round, league };
