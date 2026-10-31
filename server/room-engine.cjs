@@ -59,7 +59,7 @@ function name(value) {
 function settings(input, capacity) {
   if (!Number.isInteger(capacity) || capacity < 2 || capacity > 8) fail('Choose between 2 and 8 managers.');
   const config = { managerCount: capacity, names: Array.from({ length: capacity }, (_, i) => `Manager ${i + 1}`), formation: input.formation,
-    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, subs: input.subs === true, form: input.form === true, cup: input.cup === true, europe: input.europe === true, january: input.january === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
+    mode: input.mode, seasonFrom: input.seasonFrom, seasonTo: input.seasonTo, ratingMin: input.ratingMin, ratingMax: input.ratingMax, devMode: input.devMode === true, subs: input.subs === true, form: input.form === true, cup: input.cup === true, europe: input.europe === true, chemistry: input.chemistry === true, january: input.january === true, competition: input.competition === 'premier' ? 'premier' : 'friends' };
   if (!draft.poolShape(config.formation) || !['peak', 'season'].includes(config.mode) || !seasons.includes(config.seasonFrom) || !seasons.includes(config.seasonTo)
     || config.seasonFrom > config.seasonTo || !Number.isInteger(config.ratingMin) || !Number.isInteger(config.ratingMax)
     || config.ratingMin < 40 || config.ratingMax > 95 || config.ratingMin > config.ratingMax) fail('Choose valid formation, seasons and ratings.');
@@ -186,6 +186,12 @@ function januaryPlayers(room) {
     const season = game.config.mode === 'season' ? candidate.seasons.slice().sort((a, b) => b.seasonRating - a.seasonRating)[0] : candidate.seasons[Math.floor(random() * candidate.seasons.length)];
     return { id: candidate.player.id, player: candidate.player, season, allocatedPosition: candidate.player.positions[0] };
   });
+}
+// The second halves of a substitutes-mode matchday, with the managers' half-time changes.
+function startSecondHalf(room, now) {
+  const view = room.live?.view || (room.matchView === 'pitch' ? 'pitch' : 'classic'), round = room.league.round;
+  room.league = leagueCore.finishRound(room.league).league;
+  room.live = { round, startsAt: now, endsAt: now + LIVE_MS[view] / 2, view, from: 48, to: 97, half: 2 };
 }
 function apply(room, uid, command, now) {
   if (room.expiresAt <= now) fail('This room has expired. Create a new room.', 404);
@@ -387,7 +393,13 @@ function apply(room, uid, command, now) {
       const side = fixture.homeId === me.managerId ? 'home' : 'away', snapshot = room.league.teams.find(item => item.id === me.managerId);
       pending.changes[fixture.id] = pending.changes[fixture.id] || { home: [], away: [] };
       const mine = pending.changes[fixture.id][side];
-      if (command.type === 'readyHalf') { pending.ready[me.managerId] = command.ready === true; break; }
+      if (command.type === 'readyHalf') {
+        pending.ready[me.managerId] = command.ready === true;
+        // Once every manager playing is ready, the second half starts without waiting for the host.
+        const playing = room.league.fixtures.filter(item => pending.firstHalf[item.id]).flatMap(item => [item.homeId, item.awayId]).filter(id => room.game.managers.some(manager => manager.id === id));
+        if (playing.every(id => pending.ready[id])) startSecondHalf(room, now);
+        break;
+      }
       if (command.type === 'undoSub') { if (!mine.length) fail('There is no change to undo.'); mine.pop(); pending.ready[me.managerId] = false; break; }
       const onPitch = leagueCore.lineupAfter(snapshot, mine);
       if (command.type === 'swapHalf') {
@@ -403,9 +415,7 @@ function apply(room, uid, command, now) {
       host(room, uid);
       if (!room.league?.pending) fail('There is no half-time to finish.', 409);
       if (room.live && room.live.endsAt > now) fail('Wait for half-time.', 409);
-      const view = room.live?.view || (room.matchView === 'pitch' ? 'pitch' : 'classic'), round = room.league.round;
-      room.league = leagueCore.finishRound(room.league).league;
-      room.live = { round, startsAt: now, endsAt: now + LIVE_MS[view] / 2, view, from: 48, to: 97, half: 2 };
+      startSecondHalf(room, now);
       break;
     }
     case 'skipToDerby': {

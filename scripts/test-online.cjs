@@ -137,7 +137,12 @@ function command(room, uid, type, details = {}) { return engine.apply(room, uid,
   assert.deepEqual(saved.league.pending.changes, subs.league.pending.changes, 'Half-time changes survive a restart');
   assert.throws(() => command(subs, 'b', 'secondHalf'), /Only the host/);
   assert.throws(() => command(subs, 'a', 'playRound'), /second half/);
+  assert(subs.league.pending, 'One manager ready is not enough');
+  // Once every manager playing is ready, the second half starts by itself, exactly as if the host had kicked it off.
+  const awayUid = subs.members.find(member => member.managerId === fixture.awayId).uid, auto = command(structuredClone(subs), awayUid, 'readyHalf', { ready: true });
+  assert.equal(auto.league.pending, null); assert.deepEqual([auto.live.from, auto.live.to, auto.live.half, auto.live.startsAt], [48, 97, 2, time]);
   subs = command(subs, 'a', 'secondHalf');
+  assert.deepEqual(auto.league.fixtures, subs.league.fixtures, 'Ready-up kick-off plays the same second half');
   assert.equal(subs.league.round, 1); assert.equal(subs.league.pending, null); assert.deepEqual([subs.live.from, subs.live.to, subs.live.half], [48, 97, 2]);
   const result = subs.league.fixtures.find(item => item.id === fixture.id).result;
   assert.equal(result.subs.home.filter(change => change.on).length, 4); assert.equal(result.subs.home.filter(change => change.swap).length, 1); assert.deepEqual(result.halfTime, { home: firstHalf.homeGoals, away: firstHalf.awayGoals });
@@ -338,6 +343,36 @@ for (const stage of ['lobby', 'auction', 'season']) {
   assert.equal(engine.apply(over, null, { type: 'tick' }, time + 999999).changed, false, 'Nothing settles after the end');
   assert(engine.linkNext(over, 'b', { id: 'again', code: '0009' }).changed, 'An ended game can go to a rematch');
   assert.deepEqual(engine.unpack(engine.pack(over)).ended, over.ended);
+}
+// Chemistry: neighbouring positions link green (same club and country), amber (one) or red (neither).
+{
+  const draft = require('../src/draft-core.js'), formation = '4-3-3', slots = draft.formations[formation];
+  const links = draft.chemistryLinks(formation);
+  assert(links.length >= 14 && slots.every((_, index) => links.some(link => link.includes(index))), 'Every position links to a neighbour');
+  assert(!links.some(([a, b]) => slots[a].position === 'GK' && ['ST', 'LW', 'RW'].includes(slots[b].position)), 'Links only join neighbours');
+  const same = slots.map(() => ({ club: 'arsenal', nation: 'England' }));
+  assert.equal(draft.chemistry(formation, same).team, 100, 'Same club and country everywhere is perfect chemistry');
+  assert(draft.chemistry(formation, same).links.every(link => link.level === 'green'));
+  const clubOnly = slots.map((_, index) => ({ club: 'arsenal', nation: `N${index}` }));
+  assert(draft.chemistry(formation, clubOnly).links.every(link => link.level === 'amber') && draft.chemistry(formation, clubOnly).team === 50, 'One shared thing is amber');
+  const none = slots.map((_, index) => ({ club: `C${index}`, nation: `N${index}` }));
+  assert.equal(draft.chemistry(formation, none).team, 0); assert(draft.chemistry(formation, none).links.every(link => link.level === 'red'));
+  assert.equal(draft.chemistryBoost(10), 1.5); assert.equal(draft.chemistryBoost(0), 0);
+  // In matches: the same XI rates higher with chemistry on, and half-time changes recalculate it.
+  let chem = lobby();
+  chem = command(chem, 'a', 'settings', { capacity: 3, config: { ...config, devMode: true, chemistry: true, subs: true } });
+  chem.members.forEach(member => { chem = command(chem, member.uid, 'ready', { ready: true }); });
+  chem = command(chem, 'a', 'start');
+  const manager = chem.game.managers[0], on = league.team(chem.game, manager), off = league.team({ ...chem.game, config: { ...chem.game.config, chemistry: false } }, manager);
+  assert(Number.isInteger(on.chemistry) && on.chemistry >= 0 && on.chemistry <= 100 && off.chemistry === undefined);
+  on.squad.forEach(player => assert(Number.isInteger(player.chem) && player.chem >= 0 && player.chem <= 10));
+  assert(on.squad.every(player => Math.abs(player.effective - Math.max(40, (player.rating + draft.chemistryBoost(player.chem)) * player.fit)) < 1e-9), 'Each player gets their chemistry boost');
+  assert(on.overall >= off.overall);
+  const sub = { off: on.squad[1].id, on: on.bench[0].id }, after = league.secondHalfTeam(on, [sub]);
+  const expected = draft.chemistry(on.formation, league.lineupAfter(on, [sub]).map(player => ({ club: player.club, nation: player.nation }))).team;
+  assert.equal(after.chemistry, expected, 'A substitution changes the links');
+  chem = command(chem, 'a', 'startLeague'); chem = command(chem, 'a', 'finishLeague'); assert(engine.finished(chem));
+  assert.deepEqual(engine.unpack(engine.pack(chem)).league.fixtures, chem.league.fixtures, 'Chemistry seasons replay exactly');
 }
 let room = command(lobby(), 'a', 'start');
 assert.equal(room.status, 'draft', 'Without dev mode the auction runs');

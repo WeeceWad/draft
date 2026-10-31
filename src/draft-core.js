@@ -81,7 +81,41 @@
   const colourDistance = (a, b) => { const [r1, g1, b1] = rgb(a), [r2, g2, b2] = rgb(b), mean = (r1 + r2) / 2; return Math.sqrt((2 + mean / 256) * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + (2 + (255 - mean) / 256) * (b1 - b2) ** 2); };
   const clash = (a, b) => colourDistance(a, b) < 130;
   const textOn = hex => { const [r, g, b] = rgb(hex); return .299 * r + .587 * g + .114 * b > 150 ? '#0c1018' : '#ffffff'; };
-  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, squadSize, keepersNeeded, KITS, colourDistance, clash, textOn };
+  // ---- Chemistry (optional) ------------------------------------------------------------------------
+  // Neighbouring positions link, as on an Ultimate Team card pitch: two slots link when no teammate stands
+  // between them (a Gabriel graph on the formation layout) and they are not too far apart.
+  const linkCache = new Map();
+  function chemistryLinks(formation) {
+    if (linkCache.has(formation)) return linkCache.get(formation);
+    const slots = formations[formation] || [], points = slots.map(slot => ({ x: slot.x, y: slot.y * 1.1 })), links = [];
+    for (let a = 0; a < points.length; a++) for (let b = a + 1; b < points.length; b++) {
+      const mx = (points[a].x + points[b].x) / 2, my = (points[a].y + points[b].y) / 2, radius = ((points[a].x - points[b].x) ** 2 + (points[a].y - points[b].y) ** 2) / 4;
+      if (Math.sqrt(radius) * 2 > 46) continue;
+      if (points.some((point, index) => index !== a && index !== b && (point.x - mx) ** 2 + (point.y - my) ** 2 < radius)) continue;
+      links.push([a, b]);
+    }
+    linkCache.set(formation, links);
+    return links;
+  }
+  // A link is green when two players share a club and a country, amber when they share one, red when neither.
+  // The club is the one on the player's card, whatever the season.
+  const LINK_POINTS = { green: 2, amber: 1, red: 0 }, CHEMISTRY_BOOST = 1.5;
+  const chemistryOf = entry => entry ? { club: entry.season?.clubId || entry.club || null, nation: entry.player?.nationality || entry.nation || null } : null;
+  function linkLevel(a, b) { const club = !!a.club && a.club === b.club, nation = !!a.nation && a.nation === b.nation; return club && nation ? 'green' : club || nation ? 'amber' : 'red'; }
+  // players: one per slot in formation order (null for an empty slot), each { club, nation }.
+  // Each player scores 0-10 from their links (green 2, amber 1, red 0, over the most they could have); the team 0-100.
+  function chemistry(formation, players) {
+    const links = chemistryLinks(formation).map(([a, b]) => ({ a, b, level: players[a] && players[b] ? linkLevel(players[a], players[b]) : null }));
+    const player = players.map((item, index) => {
+      if (!item) return null;
+      const mine = links.filter(link => (link.a === index || link.b === index) && link.level);
+      return mine.length ? Math.round(10 * mine.reduce((sum, link) => sum + LINK_POINTS[link.level], 0) / (2 * mine.length)) : 0;
+    });
+    return { links, player, team: Math.round(player.reduce((sum, value) => sum + (value || 0), 0) * 100 / (10 * Math.max(1, players.length))) };
+  }
+  // A slight boost: up to +1.5 rating for a player on full chemistry, nothing taken away on none.
+  const chemistryBoost = value => CHEMISTRY_BOOST * (value || 0) / 10;
+  const api = { formations, fits, rating, remap, draft, FREE, poolShape, formationOf, squadSize, keepersNeeded, KITS, colourDistance, clash, textOn, chemistryLinks, chemistryOf, chemistry, chemistryBoost, CHEMISTRY_BOOST };
   if (typeof module !== 'undefined') module.exports = api;
   else scope.DraftCore = api;
 })(globalThis);

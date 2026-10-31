@@ -40,7 +40,8 @@
     const backFive = draft.formations[formation].filter(slot => slot.position === 'CB').length === 3 && formation.startsWith('5-');
     const squad = entries.map(entry => {
       const fit = fitMultiplier(entry.position, entry.positions), unit = ['LWB', 'RWB'].includes(entry.position) ? (backFive ? 'defence' : 'midfield') : units[entry.position];
-      return { ...entry, effective: Math.max(40, entry.rating * fit), fit, unit };
+      // With chemistry on, a player's links add up to +1.5 to their rating before the position fit applies.
+      return { ...entry, effective: Math.max(40, (entry.rating + draft.chemistryBoost(entry.chem)) * fit), fit, unit };
     });
     const exact = {};
     for (const unit of Object.keys(unitWeights)) {
@@ -53,13 +54,20 @@
     const overall = denominator ? Math.round(present.reduce((sum, unit) => sum + exact[unit] * unitWeights[unit], 0) / denominator) : 0;
     return { squad, overall, ...Object.fromEntries(Object.entries(exact).map(([unit, value]) => [unit, Math.round(value)])), placed: squad.length, misplaced: squad.filter(player => player.fit === .93).length };
   }
+  // Chemistry (optional): each player's chemistry from their links in the formation (green, amber, red; see draft-core).
+  function withChemistry(entries, formation) {
+    const result = draft.chemistry(formation, entries.map(entry => entry ? { club: entry.club, nation: entry.nation } : null));
+    return { entries: entries.map((entry, index) => entry && { ...entry, chem: result.player[index] }), chemistry: result.team };
+  }
   function team(game, manager, { january = true } = {}) {
     const formation = draft.formationOf(game, manager), slots = draft.formations[formation];
     const pool = new Map(game.pool.map(entry => [entry.id, entry]));
-    const describe = (entry, position) => ({ id: entry.id, name: entry.player.name, position, positions: entry.player.positions.slice(), rating: draft.rating(entry, game.config.mode) });
-    const entries = slots.flatMap((slot, index) => { const entry = pool.get(manager.board[index]); return entry ? [describe(entry, slot.position)] : []; });
+    const describe = (entry, position) => ({ id: entry.id, name: entry.player.name, position, positions: entry.player.positions.slice(), rating: draft.rating(entry, game.config.mode), ...draft.chemistryOf(entry) });
+    let bySlot = slots.map((slot, index) => { const entry = pool.get(manager.board[index]); return entry ? describe(entry, slot.position) : null; }), chemistry;
+    if (game.config.chemistry) ({ entries: bySlot, chemistry } = withChemistry(bySlot, formation));
+    const entries = bySlot.filter(Boolean);
     const bench = game.config.subs ? auction.purchases(game, manager.id).filter(sale => !manager.board.includes(sale.playerId) && (january || !pool.get(sale.playerId).january)).map(sale => describe(pool.get(sale.playerId), pool.get(sale.playerId).player.positions[0])) : undefined;
-    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), ...rate(entries, formation), ...(bench ? { bench } : {}),
+    return { id: manager.id, name: manager.name, formation, board: manager.board.slice(), ...rate(entries, formation), ...(bench ? { bench } : {}), ...(chemistry !== undefined ? { chemistry } : {}),
       spent: auction.STARTING_BUDGET - auction.budget(game, manager.id) };
   }
   // Substitutes mode (Touchline's own rules; 38-0 has no substitutions). Starters tire in the
@@ -75,7 +83,7 @@
   // The second-half XI after half-time changes: substitutions ({ off, on }) and position swaps ({ swap: [a, b] }).
   // Swapped players keep the stamina they had; substitutes come on fresh.
   function lineupAfter(snapshot, changes = []) {
-    const players = snapshot.squad.map(player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating, fresh: false, stamina: staminaAt(player.id, player.position) }));
+    const players = snapshot.squad.map(player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating, club: player.club, nation: player.nation, fresh: false, stamina: staminaAt(player.id, player.position) }));
     for (const change of changes) {
       if (change.swap) {
         const a = players.findIndex(player => player.id === change.swap[0]), b = players.findIndex(player => player.id === change.swap[1]);
@@ -85,13 +93,15 @@
         continue;
       }
       const index = players.findIndex(player => player.id === change.off), incoming = snapshot.bench.find(player => player.id === change.on);
-      if (index >= 0 && incoming) players[index] = { id: incoming.id, name: incoming.name, position: players[index].position, positions: incoming.positions, rating: incoming.rating, fresh: true, stamina: 100 };
+      if (index >= 0 && incoming) players[index] = { id: incoming.id, name: incoming.name, position: players[index].position, positions: incoming.positions, rating: incoming.rating, club: incoming.club, nation: incoming.nation, fresh: true, stamina: 100 };
     }
     return players;
   }
   function secondHalfTeam(snapshot, changes = []) {
-    const entries = lineupAfter(snapshot, changes).map(player => ({ ...player, rating: secondHalfRating(player) }));
-    return { ...snapshot, ...rate(entries, snapshot.formation) };
+    let entries = lineupAfter(snapshot, changes).map(player => ({ ...player, rating: secondHalfRating(player) })), chemistry = snapshot.chemistry;
+    // Changes at half-time change the links, so chemistry is worked out again for the second-half XI.
+    if (chemistry !== undefined) ({ entries, chemistry } = withChemistry(entries, snapshot.formation));
+    return { ...snapshot, ...rate(entries, snapshot.formation), ...(chemistry !== undefined ? { chemistry } : {}) };
   }
   // Instant matchdays make up to three sensible changes: the most tired outfield starters for the best bench fit.
   function autoChanges(snapshot) {
@@ -333,7 +343,7 @@
   // A team snapshot with each player's rating moved by their form.
   function formed(league, snapshot, table = null) {
     if (!league.form || snapshot.club) return snapshot;
-    const form = table || formTable(league), shift = player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, rating: player.rating + (formOf(form, player.id) - FORM_NEUTRAL) * FORM_EFFECT });
+    const form = table || formTable(league), shift = player => ({ id: player.id, name: player.name, position: player.position, positions: player.positions, club: player.club, nation: player.nation, ...(player.chem !== undefined ? { chem: player.chem } : {}), rating: player.rating + (formOf(form, player.id) - FORM_NEUTRAL) * FORM_EFFECT });
     return { ...snapshot, ...rate(snapshot.squad.map(shift), snapshot.formation), ...(snapshot.bench ? { bench: snapshot.bench.map(shift) } : {}) };
   }
   const formedTeams = league => { const table = league.form ? formTable(league) : null; return new Map(league.teams.map(item => [item.id, formed(league, item, table)])); };
